@@ -6,10 +6,18 @@
 #include <Preferences.h>
 #include "monocypher.h"
 #include "monocypher-ed25519.h"
+#include <SPI.h>
+#include <MFRC522.h>
 
 Adafruit_SSD1306 display(128, 64, &Wire, -1);
 Preferences prefs;
 String lineBuf;
+
+// ---------- RFID co-sign (F4) ----------
+// RC522 clone: SS=5, RST tied to 3.3V (soft reset), SPI 18/19/23. VersionReg reads 0x18.
+MFRC522 rfid(5, MFRC522::UNUSED_PIN);
+const uint8_t ENROLLED_UID[] = {0x20, 0x11, 0x1B, 0x5C}; // the card that co-signs large payments
+const uint8_t ENROLLED_UID_LEN = sizeof(ENROLLED_UID);
 
 // ---------- pins ----------
 const int BTN_APPROVE = 13, BTN_KILL = 27, BTN_RESET = 26;
@@ -524,6 +532,42 @@ void handleReq(JsonDocument &doc)
   showHome();
 }
 
+// ---------- RFID co-sign (F4) ----------
+String uidHex() // the UID of the last card read, as AA:BB:CC:DD
+{
+  String s;
+  for (byte i = 0; i < rfid.uid.size; i++)
+  {
+    if (i)
+      s += ":";
+    if (rfid.uid.uidByte[i] < 0x10)
+      s += "0";
+    s += String(rfid.uid.uidByte[i], HEX);
+  }
+  s.toUpperCase();
+  return s;
+}
+
+// Wait up to timeoutMs for a card. 1 = enrolled card, -1 = a different card, 0 = timeout.
+int waitForCardTap(unsigned long timeoutMs)
+{
+  unsigned long start = millis();
+  while (millis() - start < timeoutMs)
+  {
+    if (rfid.PICC_IsNewCardPresent() && rfid.PICC_ReadCardSerial())
+    {
+      bool match = (rfid.uid.size == ENROLLED_UID_LEN);
+      for (byte i = 0; match && i < rfid.uid.size; i++)
+        if (rfid.uid.uidByte[i] != ENROLLED_UID[i])
+          match = false;
+      rfid.PICC_HaltA();
+      return match ? 1 : -1;
+    }
+    delay(20);
+  }
+  return 0;
+}
+
 void handleLine(const String &line)
 {
   JsonDocument doc;
@@ -552,6 +596,19 @@ void handleLine(const String &line)
   else if (strcmp(t, "req") == 0)
   {
     handleReq(doc);
+  }
+  else if (strcmp(t, "cosign") == 0)
+  {
+    // F4 bring-up: tap a card within 8s; reports if it's the enrolled co-sign card.
+    drawResult("TAP CARD", "co-sign test (8s)");
+    int r = waitForCardTap(8000);
+    JsonDocument res;
+    res["t"] = "cosign";
+    res["match"] = (r == 1);
+    res["uid"] = (r == 0) ? "none" : uidHex();
+    serializeJson(res, Serial);
+    Serial.println();
+    showHome();
   }
   else
   {
@@ -606,6 +663,9 @@ void setup()
   pinMode(LED_R, OUTPUT);
   pinMode(LED_G, OUTPUT);
   pinMode(LED_B, OUTPUT);
+
+  SPI.begin(18, 19, 23, 5); // SCK, MISO, MOSI, SS
+  rfid.PCD_Init();
 
   loadOrCreateKey();
   showHome();
