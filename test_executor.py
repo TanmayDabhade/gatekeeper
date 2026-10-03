@@ -369,3 +369,61 @@ def test_run_code_without_docker():
         raise FileNotFoundError("docker")
     r = executor.run_code("print(1)", runner=runner)
     assert not r["ok"] and r["verdict"] == "error" and "docker" in r["detail"]
+
+
+# ---------------------------------------------------------------- device link (real-board quirks)
+
+class FakePort:
+    """Stands in for a pyserial port: replays scripted lines, records writes."""
+
+    def __init__(self, lines):
+        self.lines = list(lines)
+        self.written = []
+
+    def reset_input_buffer(self):
+        pass
+
+    def write(self, data):
+        self.written.append(data)
+
+    def readline(self, size=-1):
+        return self.lines.pop(0) if self.lines else b""     # b"" = timeout
+
+
+def test_link_skips_boot_noise_before_json():
+    port = FakePort([b"ets Jun  8 2016 00:22:57\r\n", b"rst:0x1 (POWERON_RESET)\r\n", b"\r\n",
+                     b'{"t":"pong"}\r\n'])
+    link = executor.DeviceLink(port=port, timeout=5)
+    assert link.call({"t": "ping"}) == {"t": "pong"}
+    assert port.written == [b'{"t":"ping"}\n']
+
+
+def test_link_only_noise_is_timeout():
+    link = executor.DeviceLink(port=FakePort([b"boot noise\r\n"]), timeout=5)
+    with pytest.raises(executor.DeviceError, match="timeout"):
+        link.call({"t": "ping"})
+
+
+def test_link_truncated_json_refused():
+    link = executor.DeviceLink(port=FakePort([b'{"t":"po']), timeout=5)
+    with pytest.raises(executor.DeviceError, match="truncated"):
+        link.call({"t": "ping"})
+
+
+def test_link_opens_with_dtr_rts_low(monkeypatch):
+    seen = {}
+
+    class Port:
+        dtr = rts = None
+
+        def open(self):
+            seen["dtr"], seen["rts"] = self.dtr, self.rts
+
+        def reset_input_buffer(self):
+            pass
+
+    monkeypatch.setattr(executor.serial, "serial_for_url",
+                        lambda url, **kw: (seen.update(kw), Port())[1])
+    executor.DeviceLink("/dev/cu.usbserial-0001", settle_s=0)
+    assert seen["dtr"] is False and seen["rts"] is False   # set BEFORE open: no reboot
+    assert seen["do_not_open"] is True

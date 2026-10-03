@@ -136,7 +136,10 @@ bool isContact(const String &to)
 
 bool isSensitive(const String &file)
 {
-  return file.indexOf("/data/sensitive/") >= 0;
+  // Case-insensitive: on macOS data/SENSITIVE/x.pdf opens the same file as data/sensitive/x.pdf
+  String f = file;
+  f.toLowerCase();
+  return f.indexOf("/data/sensitive/") >= 0;
 }
 
 int deletesInWindow()
@@ -328,6 +331,83 @@ int waitForHold()
   return 0;
 }
 
+// ---------- request validation (mirrors validate() in mock_device.py) ----------
+// Printable ASCII only: '|' would make the signed string ambiguous, control chars could
+// spoof the screen, and non-ASCII could hide a lookalike.
+bool cleanField(const String &s)
+{
+  for (unsigned i = 0; i < s.length(); i++)
+  {
+    uint8_t c = (uint8_t)s[i];
+    if (c < 32 || c >= 0x7F || c == '|')
+      return false;
+  }
+  return true;
+}
+
+bool isLowerHex(const String &s, unsigned n)
+{
+  if (s.length() != n)
+    return false;
+  for (unsigned i = 0; i < n; i++)
+  {
+    char c = s[i];
+    if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')))
+      return false;
+  }
+  return true;
+}
+
+// Returns nullptr if the request is well-formed, else the reason.
+const char *validateReq(JsonDocument &doc)
+{
+  const char *strs[] = {"act", "to", "file", "fh", "claim", "nonce"};
+  for (const char *k : strs)
+  {
+    if (!doc[k].is<const char *>())
+      return "missing string field";
+    if (!cleanField(doc[k].as<String>()))
+      return "forbidden characters";
+  }
+  const char *ints[] = {"exp", "taint", "bench"};
+  for (const char *k : ints)
+  {
+    if (!doc[k].is<long long>())
+      return "missing integer field";
+  }
+  String act = doc["act"].as<String>(), to = doc["to"].as<String>();
+  String file = doc["file"].as<String>(), fh = doc["fh"].as<String>();
+  String claim = doc["claim"].as<String>(), nonce = doc["nonce"].as<String>();
+  long long taint = doc["taint"], bench = doc["bench"], exp = doc["exp"];
+  if (claim != "low" && claim != "medium" && claim != "high")
+    return "bad claim";
+  if ((taint != 0 && taint != 1) || (bench != 0 && bench != 1))
+    return "taint/bench must be 0 or 1";
+  if (exp < 0 || exp > 0xFFFFFFFFLL)
+    return "bad exp";
+  if (!isLowerHex(nonce, 32))
+    return "bad nonce";
+  if (act == "delete_file")
+  {
+    if (to.length())
+      return "to must be empty for delete_file";
+    if (!file.startsWith("/"))
+      return "file must be an absolute path";
+  }
+  else if (act == "send_email")
+  {
+    if (!to.length())
+      return "to is required for send_email";
+    if (file.length() && !file.startsWith("/"))
+      return "file must be an absolute path";
+  }
+  if (file.indexOf("/../") >= 0 || file.indexOf("/./") >= 0 || file.indexOf("//") >= 0)
+    return "file must be a canonical path";
+  if (file.length() ? !isLowerHex(fh, 64) : fh.length() != 0)
+    return "bad fh";
+  return nullptr;
+}
+
 // ---------- protocol ----------
 void sendRes(const String &nonce, const char *v, const String &sig)
 {
@@ -342,6 +422,12 @@ void sendRes(const String &nonce, const char *v, const String &sig)
 
 void handleReq(JsonDocument &doc)
 {
+  if (validateReq(doc))
+  {
+    String n = doc["nonce"].is<const char *>() ? doc["nonce"].as<String>() : String("");
+    sendRes(n, "denied", ""); // malformed: refuse, never sign
+    return;
+  }
   String act = doc["act"] | "";
   String to = doc["to"] | "";
   String file = doc["file"] | "";
@@ -370,7 +456,11 @@ void handleReq(JsonDocument &doc)
     if (lied)
       sendRes(nonce, "locked", "");
     else if (v == V_ALLOW)
+    {
       sendRes(nonce, "allow", signMsg(msg));
+      if (act == "delete_file")
+        recordDelete(); // a signed delete is real even in bench: keep the rate limit honest
+    }
     else if (v == V_BLOCK)
       sendRes(nonce, "blocked", "");
     else
@@ -434,8 +524,11 @@ void handleReq(JsonDocument &doc)
 void handleLine(const String &line)
 {
   JsonDocument doc;
-  if (deserializeJson(doc, line))
+  if (deserializeJson(doc, line) || !doc.is<JsonObject>())
+  {
+    sendRes("", "denied", ""); // always answer, so the host never waits out its timeout
     return;
+  }
   const char *t = doc["t"] | "";
 
   if (strcmp(t, "ping") == 0)
@@ -456,6 +549,10 @@ void handleLine(const String &line)
   else if (strcmp(t, "req") == 0)
   {
     handleReq(doc);
+  }
+  else
+  {
+    sendRes("", "denied", "");
   }
 }
 
@@ -494,7 +591,7 @@ void checkButtons()
 
 void setup()
 {
-  Serial.setRxBufferSize(1024);
+  Serial.setRxBufferSize(2048);
   Serial.begin(115200);
   Wire.begin(21, 22);
   Wire.setClock(400000); // faster screen updates
@@ -511,8 +608,11 @@ void setup()
   showHome();
 }
 
+const unsigned MAX_LINE = 4096; // matches protocol.MAX_LINE
+
 void loop()
 {
+  static bool overflow = false;
   checkButtons();
   while (Serial.available())
   {
@@ -520,13 +620,20 @@ void loop()
     if (c == '\n')
     {
       lineBuf.trim();
-      if (lineBuf.length())
+      if (overflow)
+        sendRes("", "denied", ""); // too long: refuse instead of parsing a truncated line
+      else if (lineBuf.length())
         handleLine(lineBuf);
       lineBuf = "";
+      overflow = false;
     }
-    else if (lineBuf.length() < 1024)
+    else if (lineBuf.length() < MAX_LINE)
     {
       lineBuf += c;
+    }
+    else
+    {
+      overflow = true;
     }
   }
 }
