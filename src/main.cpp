@@ -34,10 +34,11 @@ const int DELETE_LIMIT = 5;
 const char *CONTACTS[] = {"boss@ourcompany.com", "accountant@trustedcpa.com"};
 const int NUM_CONTACTS = 2;
 
-// F4: pay_invoice payee allowlist (PLACEHOLDER -- sync "acme-001" with Tanmay's Nessie account id)
-const char *PAYEES[] = {"acme-001"};
+// F4: pay_invoice payee allowlist (Acme's Nessie account id; must match mock_device.PAYEES)
+const char *PAYEES[] = {"7083a93b-e422-4fa6-8188-330034f0c237"};
 const int NUM_PAYEES = 1;
-const uint32_t COSIGN_THRESHOLD_CENTS = 50000; // payments over $500 need an RFID co-sign (S3)
+const uint32_t COSIGN_THRESHOLD_CENTS = 50000;  // payments over $500 need an RFID co-sign (S3)
+const uint32_t MAX_AMOUNT_CENTS = 100000000;    // $1,000,000; anything bigger is malformed
 
 // ---------- state ----------
 uint8_t secretKey[64];
@@ -437,18 +438,21 @@ const char *validateReq(JsonDocument &doc)
   }
   else if (act == "pay_invoice")
   {
-    if (!to.length())
-      return "payee required for pay_invoice";
+    if (to.length() < 1 || to.length() > 64)
+      return "bad payee id";
+    for (unsigned i = 0; i < to.length(); i++)
+      if (!isAlphaNumeric(to[i]) && to[i] != '-') // payee id: [A-Za-z0-9-]{1,64}
+        return "bad payee id";
     if (file.length() || fh.length())
       return "pay_invoice has no file";
-    if (amt <= 0)
-      return "amt required for pay_invoice";
+    if (amt <= 0 || amt > MAX_AMOUNT_CENTS)
+      return "bad amt";
   }
   if (act != "pay_invoice" && amt != 0)
     return "amt only for pay_invoice";
   if (act == "send_email")
   {
-    if (bh.length() && !isLowerHex(bh, 64))
+    if (!isLowerHex(bh, 64)) // v2: send_email always carries a 64-hex body hash
       return "bad bh";
   }
   else if (bh.length())
