@@ -317,3 +317,163 @@ def test_duplicate_headers_rejected(gateway, anchor, extra):
     raw = raw[:i] + extra + raw[i:]
     ok, reason, _ = v.check(raw, [forge.BOSS])
     assert not ok and "duplicate" in reason
+
+
+# ---------------------------------------------------------------- M9 bank: verify(request, approval)
+
+import bank
+import demo_forge
+from config import NESSIE_ACME_ACCOUNT as ACME_ID, NESSIE_LOOKALIKE_ACCOUNT as EVIL_ID
+
+
+def pay_approval(link, cents=25000, payee=ACME_ID):
+    link.dev.wait_for_human = lambda: "c" if cents > 50000 else "a"     # card over $500
+    a = demo_forge.device_approval(link, payee, cents)
+    assert a is not None, "device didn't sign"
+    return a
+
+
+def pay_request(cents=25000, payee=ACME_ID):
+    return {"act": "pay_invoice", "to": payee, "file": "", "fh": "", "bh": "", "amt": cents}
+
+
+def test_verify_accepts_a_genuine_approval(gateway):
+    link, v, _, _ = gateway
+    ok, reason = v.verify(pay_request(), pay_approval(link))
+    assert ok, reason
+
+
+def test_verify_rejects_another_key(gateway):
+    link, _, _, _ = gateway
+    other = verifier.Verifier(mock_device.Device().sk.verify_key)
+    ok, reason = other.verify(pay_request(), pay_approval(link))
+    assert not ok and "pinned device key" in reason
+
+
+def test_verify_rejects_a_forgery(gateway):
+    _, v, _, _ = gateway
+    ok, reason = v.verify(pay_request(480000, EVIL_ID), demo_forge.forged(EVIL_ID, 480000))
+    assert not ok and "signature" in reason
+
+
+@pytest.mark.parametrize("field, value", [("amt", 2500000), ("to", EVIL_ID), ("bh", "0" * 64),
+                                          ("taint", 1), ("exp", 9999999999)])
+def test_verify_rejects_a_tampered_approval(gateway, field, value):
+    link, v, _, _ = gateway
+    a = dict(pay_approval(link), **{field: value})
+    req = dict(pay_request(), **({field: value} if field in ("amt", "to", "bh") else {}))
+    ok, reason = v.verify(req, a)
+    assert not ok and "signature" in reason
+
+
+@pytest.mark.parametrize("field, value", [("amt", 2500000), ("to", EVIL_ID)])
+def test_verify_rejects_an_action_that_differs_from_the_approval(gateway, field, value):
+    link, v, _, _ = gateway
+    ok, reason = v.verify(dict(pay_request(), **{field: value}), pay_approval(link))
+    assert not ok and f"device signed {field}=" in reason
+
+
+def test_verify_rejects_a_replay(gateway):
+    link, v, _, _ = gateway
+    a = pay_approval(link)
+    assert v.verify(pay_request(), a)[0]
+    ok, reason = v.verify(pay_request(), a)
+    assert not ok and "replayed" in reason
+
+
+def test_verify_rejects_an_expired_approval(gateway):
+    link, _, _, _ = gateway
+    a = pay_approval(link)
+    later = verifier.Verifier(link.dev.sk.verify_key, clock=lambda: a["exp"] + 1)
+    ok, reason = later.verify(pay_request(), a)
+    assert not ok and "expired" in reason
+
+
+@pytest.mark.parametrize("v_", [None, "hold", "denied", "blocked"])
+def test_verify_rejects_a_non_signing_verdict(gateway, v_):
+    link, v, _, _ = gateway
+    ok, reason = v.verify(pay_request(), dict(pay_approval(link), v=v_))
+    assert not ok and "verdict" in reason
+
+
+@pytest.mark.parametrize("approval", [{}, None, {"sig": "x"}])
+def test_verify_rejects_garbage(gateway, approval):
+    _, v, _, _ = gateway
+    assert not v.verify(pay_request(), approval)[0]
+
+
+def test_failed_forgeries_do_not_burn_the_real_approval(gateway):
+    link, v, _, _ = gateway
+    a = pay_approval(link)
+    assert not v.verify(pay_request(2500000), dict(a, amt=2500000))[0]
+    assert v.verify(pay_request(), a)[0]
+
+
+# ---------------------------------------------------------------- bank over HTTP
+
+def test_demo_moves_money_only_for_the_genuine_approval(capsys):
+    link, url, label, server = demo_forge.start_offline()
+    try:
+        if "real Nessie" in label:
+            pytest.skip("NESSIE_API_KEY is set; this test must not touch the sandbox")
+        assert demo_forge.run(link, url)
+        assert "FAIL" not in capsys.readouterr().out
+        books = demo_forge.balances(url)
+        assert books["Acme Supplies"] == 100_000 + demo_forge.AMOUNT    # moved exactly once
+        assert books["Acme Supp1ies (lookalike)"] == 0
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+@pytest.fixture
+def live_bank(gateway, monkeypatch):
+    """A bank on a free port with an in-memory ledger; the executor's BANK_URL points at it."""
+    link, _, _, _ = gateway
+    ledger = demo_forge.Ledger()
+    monkeypatch.setattr(bank, "say", lambda *a: None)
+    server = bank.serve(bank.Bank(verifier.Verifier(link.dev.sk.verify_key), ledger.transfer,
+                                  ledger.balances), port=0)
+    threading.Thread(target=server.serve_forever, args=(0.05,), daemon=True).start()
+    monkeypatch.setattr(executor, "BANK_URL", f"http://{GATEWAY_HOST}:{server.server_address[1]}")
+    yield link, ledger
+    server.shutdown()
+    server.server_close()
+
+
+def test_executor_pays_only_through_the_bank(live_bank, tmp_path):
+    link, ledger = live_bank
+    link.dev.wait_for_human = lambda: "a"
+    (tmp_path / "inbox.json").write_text("[]")
+    ex = executor.Executor(link, link.dev.sk.verify_key, data_dir=str(tmp_path),
+                           inbox_path=str(tmp_path / "inbox.json"))    # default pay = the bank
+    res = ex.pay_invoice(ACME_ID, 25000, "INV-2290")
+    assert res["ok"] and ledger.cents[ACME_ID] == 100_000 + 25000
+
+
+def test_bank_refusal_reaches_the_executor(live_bank):
+    link, ledger = live_bank
+    with pytest.raises(executor.BankRefused, match="403.*signature"):
+        executor._bank_pay(EVIL_ID, 480000, "", demo_forge.forged(EVIL_ID, 480000))
+    assert ledger.cents[EVIL_ID] == 0
+
+
+def test_bank_never_pays_twice_when_the_transfer_fails(gateway):
+    link, v, _, _ = gateway
+    calls = []
+    def flaky(*a):
+        calls.append(a)
+        raise OSError("Nessie down")
+    b = bank.Bank(v, flaky)
+    body = {"payee": ACME_ID, "amount_cents": 25000, "approval": pay_approval(link)}
+    assert b.pay(body)[0] == 502
+    status, out = b.pay(body)
+    assert status == 403 and "replayed" in out["reason"] and len(calls) == 1
+
+
+@pytest.mark.parametrize("body", [{}, {"payee": ACME_ID}, {"payee": ACME_ID, "amount_cents": 1,
+                                                             "approval": {}, "memo": 5}])
+def test_bank_rejects_malformed_bodies(gateway, body):
+    _, v, _, _ = gateway
+    status, _ = bank.Bank(v, lambda *a: pytest.fail("paid")).pay(body)
+    assert status in (400, 403)

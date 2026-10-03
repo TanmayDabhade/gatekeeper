@@ -152,14 +152,68 @@ class NonceStore:
 
 
 class Verifier:
-    """Decides whether one message may be delivered. Keeps its own record of used nonces,
-    on disk when `nonce_path` is set (the gateway always sets it)."""
+    """Decides whether one action may be carried out, on the device's signature alone. Trusts only
+    the pinned device key and keeps its own record of used nonces (on disk when `nonce_path` is
+    set), separate from the executor's: it's a separate trust domain. check() is the mail
+    gateway's entry point, verify() the bank's."""
 
     def __init__(self, verify_key, clock=time.time, nonce_path=None):
         self.vk = verify_key
         self.clock = clock
         self.used = NonceStore(nonce_path, clock)
         self.lock = threading.Lock()
+
+    def _signed_by_device(self, a):
+        """Error string, or None if `a`'s signature verifies under the pinned key."""
+        if not isinstance(a.get("sig"), str) or not HEX128.fullmatch(a["sig"]):
+            return "malformed signature"
+        signed = protocol.signed_message(a["act"], a["to"], a["file"], a["fh"], a["nonce"],
+                                         a["exp"], a["taint"], a["amt"], a["bh"])
+        try:
+            self.vk.verify(signed, bytes.fromhex(a["sig"]))
+        except BadSignatureError:
+            return "signature does not verify under the pinned device key"
+        return None
+
+    def _consume(self, a):
+        """Error string, or None once the nonce is recorded. Call only after every other check,
+        so failed forgeries can't burn a legitimate approval."""
+        if self.clock() > a["exp"]:
+            return "approval expired"
+        with self.lock:
+            if a["nonce"] in self.used:
+                return "replayed approval (nonce already used)"
+            try:
+                self.used.add(a["nonce"], a["exp"])
+            except OSError as e:
+                return f"can't record the nonce, refusing: {e}"
+        return None
+
+    def verify(self, request, approval):
+        """Return (ok, reason). `request` is the action about to be performed ({act, to, file, fh,
+        bh, amt}); `approval` is what the laptop says the device signed (those fields plus nonce,
+        exp, taint, sig and the verdict v). Nothing the laptop claims is trusted: the signature
+        must verify, and the signed fields must be exactly the action being performed."""
+        try:
+            a = {k: approval[k] for k in FIELDS} | {"v": approval.get("v")}
+            act = {k: request[k] for k in ("act", "to", "file", "fh", "bh", "amt")}
+        except (KeyError, TypeError):
+            return False, "approval or request is missing fields"
+        if any(type(a[k]) is not int for k in ("amt", "exp", "taint")) or \
+                any(not isinstance(a[k], str) for k in FIELDS if k not in ("amt", "exp", "taint")):
+            return False, "approval fields have the wrong types"
+        if a["v"] not in protocol.SIGNED_VERDICTS:
+            return False, f"verdict {a['v']!r} doesn't authorize anything"
+        err = self._signed_by_device(a)
+        if err:
+            return False, err
+        for k, want in act.items():
+            if a[k] != want:
+                return False, f"device signed {k}={a[k]!r}, but the action has {k}={want!r}"
+        err = self._consume(a)
+        if err:
+            return False, err
+        return True, f"device-signed {a['act']} (nonce {a['nonce'][:8]})"
 
     def check(self, raw, rcpts):
         """Return (ok, reason, nonce). Consumes the nonce only when the message is accepted,
@@ -174,14 +228,9 @@ class Verifier:
             return False, err, None
         if a["act"] != "send_email":
             return False, f"approval is for {a['act']!r}, not send_email", None
-        if not HEX128.fullmatch(a["sig"]):
-            return False, "malformed signature", None
-        signed = protocol.signed_message(a["act"], a["to"], a["file"], a["fh"], a["nonce"],
-                                         a["exp"], a["taint"], a["amt"], a["bh"])
-        try:
-            self.vk.verify(signed, bytes.fromhex(a["sig"]))
-        except BadSignatureError:
-            return False, "signature does not verify under the pinned device key", None
+        err = self._signed_by_device(a)
+        if err:
+            return False, err, None
 
         # The signature is real. Now it must describe this delivery exactly.
         if [r.lower() for r in rcpts] != [a["to"].lower()]:
@@ -202,15 +251,9 @@ class Verifier:
                 return False, "attachment is not the file the device approved (SHA-256 differs)", None
             if (att.get_filename() or "") != os.path.basename(a["file"]):
                 return False, "attachment name doesn't match the approved file", None
-        if self.clock() > a["exp"]:
-            return False, "approval expired", None
-        with self.lock:
-            if a["nonce"] in self.used:
-                return False, "replayed approval (nonce already used)", None
-            try:
-                self.used.add(a["nonce"], a["exp"])
-            except OSError as e:
-                return False, f"can't record the nonce, refusing to deliver: {e}", None
+        err = self._consume(a)
+        if err:
+            return False, err, None
         return True, f"device-signed: {os.path.basename(a['file']) or '(no file)'} -> {a['to']}", \
             a["nonce"]
 

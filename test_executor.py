@@ -61,8 +61,8 @@ def env(tmp_path):
     ]))
     dev = FakeDevice()
     sent, paid = [], []
-    def pay(payee, cents, memo, ref):
-        paid.append((payee, cents, memo, ref))
+    def pay(payee, cents, memo, approval):
+        paid.append((payee, cents, memo, approval["nonce"]))
         return {"withdrawal": "w1", "deposit": "d1"}
     ex = executor.Executor(dev, dev.sk.verify_key, data_dir=str(data),
                            inbox_path=str(inbox), smtp_send=sent.append, pay=pay)
@@ -122,7 +122,7 @@ def test_send_carries_the_device_approval_for_the_verifier(env):
     a, err = verifier.read_approval(env["sent"][0])
     assert err is None
     assert a == {k: req[k] for k in verifier.FIELDS if k != "sig"} | {"sig": a["sig"]}
-    assert a["sig"] == env["dev"].sign(req) and res["approval"] == a
+    assert a["sig"] == env["dev"].sign(req) and res["approval"] == a | {"v": "allow"}
 
 
 def test_send_without_attachment_uses_empty_file_and_fh(env):
@@ -456,7 +456,7 @@ def test_pay_signed_moves_exact_amount(env):
         ("pay_invoice", ACME, "", "", 25000)
     assert req["bh"] == ""                  # CONTRACT: bh is only for send_email
     assert res["ok"] and res["transfer"] == {"withdrawal": "w1", "deposit": "d1"}
-    assert env["paid"] == [(ACME, 25000, "INV-2290", res["nonce"][:12])]
+    assert env["paid"] == [(ACME, 25000, "INV-2290", res["nonce"])]
     assert res["approval"]["amt"] == 25000 and res["approval"]["bh"] == req["bh"]
 
 
@@ -534,3 +534,21 @@ def test_signed_message_is_contract_v2():
         b"v2|pay_invoice|p||||25000|n|5|0"
     assert protocol.signed_message("send_email", "a@b.co", "/f", "fh", "n", 5, 1, 0, "bh") == \
         b"v2|send_email|a@b.co|/f|fh|bh|0|n|5|1"
+
+
+def test_pay_hands_the_bank_the_full_device_approval(env):
+    seen = []
+    env["ex"].pay = lambda payee, cents, memo, approval: seen.append(approval) or {"w": 1}
+    res = env["ex"].pay_invoice(ACME, 25000, "INV-2290")
+    req = env["dev"].requests[-1]
+    assert seen == [res["approval"]]
+    assert seen[0] == {k: req[k] for k in ("act", "to", "file", "fh", "bh", "amt", "nonce",
+                                           "exp", "taint")} | {"sig": seen[0]["sig"], "v": "allow"}
+
+
+def test_bank_refusal_is_error_not_paid(env):
+    def refuse(*a):
+        raise executor.BankRefused("bank refused (403): signature does not verify")
+    env["ex"].pay = refuse
+    res = env["ex"].pay_invoice(ACME, 25000)
+    assert (res["ok"], res["verdict"]) == (False, "error") and "403" in res["detail"]

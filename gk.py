@@ -4,8 +4,8 @@
   python gk.py inbox                         read the inbox (sets taint if external mail)
   python gk.py send --to boss@ourcompany.com --file data/public/q3_summary.pdf --claim low
   python gk.py delete --file data/public/q3_summary.pdf --claim medium
-  python gk.py pay --to <nessie payee id> --amt 25000 [--memo "INV-2290"]   (cents; claim high)
-  python gk.py balances                      Nessie ledger balances (needs NESSIE_API_KEY)
+  python gk.py pay --to <nessie payee id> --amt 25000 [--memo "INV-2290"]   (cents; via bank.py)
+  python gk.py balances                      Nessie ledger balances, read through the bank
   python gk.py run --code 'print(2+2)'       (or --file script.py)
 
 Common flags: --bench (device returns hold instead of prompting),
@@ -60,13 +60,16 @@ def main():
 
     args = ap.parse_args()
 
-    if args.cmd == "balances":
+    if args.cmd == "balances":         # through the bank: the laptop has no Nessie key
+        import urllib.error
+        import demo_forge
         import nessie
+        from config import BANK_URL
         try:
-            for name, acct, cents in nessie.balances(nessie.Nessie()):
-                print(f"{name:28} {nessie.dollars(cents):>14}   {acct}")
-        except nessie.NessieError as e:
-            sys.exit(f"error: {e}")
+            for name, cents in demo_forge.balances(BANK_URL).items():
+                print(f"{name:28} {nessie.dollars(cents):>14}")
+        except urllib.error.URLError as e:
+            sys.exit(f"error: no bank at {BANK_URL} (start python bank.py): {e.reason}")
         return
 
     if args.cmd == "run":

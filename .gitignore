@@ -13,3 +13,4 @@ bench_results/
 .vscode/launch.json
 .vscode/ipch
 .gateway_nonces
+.bank_nonces
