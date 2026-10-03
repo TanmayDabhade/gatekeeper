@@ -35,6 +35,8 @@ scenarios.py      M4: 24 injection attacks + 20 benign requests (inbox, task, ha
 nessie.py         M6: Nessie client (withdrawal + deposit per payment) and ledger balances; `setup` makes demo accounts
 test_nessie.py    M6: Nessie client against a fake API
 verifier.py       M9: separate mail gateway (:1026) that re-checks the device signature before relaying to Mailpit
+bank.py           M9: separate "bank" process (:8099) that holds the Nessie key and pays only on a verified device signature
+demo_forge.py     M9: legit / forged / tampered / replayed payment vs the bank, with Nessie balances as proof (--offline)
 forge.py          M9: compromised-laptop demo: 7 forgeries + replay vs the gateway (--offline needs nothing)
 bench.py          M4-M5: runs every scenario through agent+executor+device (bench mode), prints the metrics
 smoke_device.py   30 contract and policy cases (bench, no buttons) against the mock OR the board
@@ -71,8 +73,10 @@ GATEKEEPER_COMPROMISED=1 .venv/bin/python agent.py   # scripted hijacked agent, 
 .venv/bin/python agent.py "Handle my inbox"          # real LLM (LLM_BASE_URL, LLM_MODEL, LLM_API_KEY); --show-calls to debug
 .venv/bin/python -m pytest -q test_executor.py test_mock_device.py test_agent.py test_bench.py test_verifier.py test_nessie.py   # unit tests (no mock/Mailpit/Docker/key needed)
 .venv/bin/python smoke_device.py                 # 30 cases against a fresh mock
-.venv/bin/python gk.py pay --to 7083a93b-e422-4fa6-8188-330034f0c237 --amt 25000 --memo INV-2290   # M6 (needs NESSIE_API_KEY)
-.venv/bin/python gk.py balances                   # Nessie ledger balances: proof nothing moved after a block
+NESSIE_API_KEY=... .venv/bin/python bank.py         # M9 bank: the only process with the Nessie key
+.venv/bin/python gk.py pay --to 7083a93b-e422-4fa6-8188-330034f0c237 --amt 25000 --memo INV-2290   # M6, paid via the bank
+.venv/bin/python gk.py balances                   # Nessie ledger balances (via the bank): proof nothing moved after a block
+.venv/bin/python demo_forge.py                    # M9 payment demo: only the genuine approval moves money (--offline: no servers)
 GATEKEEPER_COMPROMISED=invoice .venv/bin/python agent.py   # scripted invoice fraud (lookalike payee)
 .venv/bin/python verifier.py                      # M9 gateway on :1026 (trusts the pinned key; run gk.py pin first)
 GATEKEEPER_SMTP_PORT=1026 .venv/bin/python agent.py   # executor mail goes through the gateway
@@ -88,6 +92,6 @@ Name the test files explicitly. A bare `pytest` also collects the `test_*.py` bo
 
 **Real device:** `GATEKEEPER_PORT=/dev/cu.usbserial-0001` (CP2102). Close every serial monitor first, because only one program can hold the port. The main board's pubkey is `4f3339776edac5164f1ba346b3dd105b0648caaf8f6c32d91e546860d1d4cfb6`. The spare board has a different key, and `pio run -t erase` rotates it, so re-run `gk.py pin --force` after either.
 
-**Demo startup:** plug in the device (it shows GATEKEEPER), then start Docker and Mailpit with `localhost:8025` on screen two, close the serial monitors, pin the key, start `verifier.py` and export `GATEKEEPER_SMTP_PORT=1026`, start the executor, and run the benign scenario as a smoke test.
+**Demo startup:** plug in the device (it shows GATEKEEPER), then start Docker and Mailpit with `localhost:8025` on screen two, close the serial monitors, pin the key, start `verifier.py` and export `GATEKEEPER_SMTP_PORT=1026`, start `bank.py` (with `NESSIE_API_KEY`, in its own terminal), start the executor, and run the benign scenario as a smoke test.
 
 **Hardware gotchas:** `executor.DeviceLink` already handles the two big ones: it holds `dtr`/`rts` low before opening (otherwise the ESP32 reboots) and skips lines that don't start with `{` (boot noise). The package is `pyserial`, never `serial`. An honest agent hitting LOCKED means the system prompt doesn't define HIGH risk. The full gotcha table is in the KT doc.

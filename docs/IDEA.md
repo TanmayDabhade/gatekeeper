@@ -25,7 +25,7 @@ Build priority (per the review): **1** core sign-and-verify plus the trusted dis
 - **Extras:** buzzer, ElevenLabs spoken alerts that read the true action (M7), Nessie payments (M6).
 
 ## Out of scope
-- Defending against a fully compromised laptop. In the prototype the executor verifies signatures on the same machine. In production, the bank or mail gateway verifies them.
+- Defending against a fully compromised laptop *in production*. The prototype now demos the answer: the mail gateway (`verifier.py`) and the bank (`bank.py`) are separate processes that verify the device signature themselves (M9). What's still out of scope: real network separation (Mailpit still accepts direct connections, and the bank runs on the same machine).
 - Real email or money (Mailpit and the Nessie sandbox only) and real sensitive data (fake PDFs)
 - A secure element for the key (it's in ESP32 flash for now), per-organization policy management
 - Approving every routine action
