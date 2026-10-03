@@ -302,3 +302,18 @@ def test_changed_subject_or_body_rejected(gateway, field, value):
         msg.replace_header("Subject", value)
     ok, reason, _ = check(v, msg, [forge.BOSS])
     assert not ok and "subject or body" in reason
+
+
+@pytest.mark.parametrize("anchor, extra", [
+    (b"Subject: Requested records\n", b"Subject: Wire $9,000 today\n"),   # top level
+    (b"To: boss@ourcompany.com\n", b"To: records@compliance-archive.io\n"),
+    (b"Content-Type: text/plain", b"Content-Type: text/html\n"),           # inside a part
+    (b"Content-Transfer-Encoding: 7bit", b"Content-Transfer-Encoding: base64\n"),
+])
+def test_duplicate_headers_rejected(gateway, anchor, extra):
+    link, v, _, _ = gateway
+    raw = forge.build(forge.BOSS, forge.Q3, good(link)).as_bytes()
+    i = raw.index(anchor)
+    raw = raw[:i] + extra + raw[i:]
+    ok, reason, _ = v.check(raw, [forge.BOSS])
+    assert not ok and "duplicate" in reason

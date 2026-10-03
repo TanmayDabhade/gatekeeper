@@ -40,6 +40,20 @@ HEADER = "X-Gatekeeper-"
 HEX64 = re.compile(r"[0-9a-f]{64}")
 HEX128 = re.compile(r"[0-9a-f]{128}")
 MAX_MESSAGE = 10 * 1024 * 1024
+# Headers that must appear at most once. With two Subjects, this check would hash one and a mail
+# client might show the other, so any duplicate is refused outright.
+SINGLE = ("Subject", "From", "To", "Cc", "Bcc", "Reply-To", "Sender", "Date", "Message-ID",
+          "MIME-Version", "Content-Type", "Content-Transfer-Encoding", "Content-Disposition")
+
+
+def _duplicate_header(msg):
+    """Name of the first header that appears twice in the message or any of its parts, or None."""
+    for part in msg.walk():
+        seen = [k.lower() for k in part.keys()]
+        for name in SINGLE:
+            if seen.count(name.lower()) > 1:
+                return name
+    return None
 
 _print_lock = threading.Lock()
 
@@ -152,6 +166,9 @@ class Verifier:
         so failed forgeries can't burn a legitimate approval. A consumed nonce is never given
         back, even if the relay then fails: the upstream may have taken the message anyway."""
         msg = email.message_from_bytes(raw, policy=email.policy.default)
+        dup = _duplicate_header(msg)
+        if dup:
+            return False, f"duplicate {dup} header", None
         a, err = read_approval(msg)
         if err:
             return False, err, None
