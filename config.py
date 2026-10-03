@@ -25,9 +25,15 @@ PUBKEY_PATH = os.environ.get("GATEKEEPER_PUBKEY", os.path.join(BASE_DIR, ".devic
 # Session taint
 COMPANY_DOMAIN = "ourcompany.com"
 
-# Email (Mailpit)
+# Email (Mailpit). The executor sends to SMTP_PORT: Mailpit directly (1025), or the M9
+# verifier gateway with GATEKEEPER_SMTP_PORT=1026, which relays to Mailpit only if the
+# device's signature checks out.
 SMTP_HOST = "localhost"
-SMTP_PORT = 1025
+SMTP_PORT = int(os.environ.get("GATEKEEPER_SMTP_PORT", "1025"))
+UPSTREAM_SMTP_PORT = 1025       # where the gateway relays verified mail (Mailpit)
+GATEWAY_HOST = "127.0.0.1"
+GATEWAY_PORT = 1026
+GATEWAY_NONCES = os.path.join(BASE_DIR, ".gateway_nonces")   # used approvals, survives restarts
 MAILPIT_UI = "http://localhost:8025"
 SENDER = "assistant@ourcompany.com"
 

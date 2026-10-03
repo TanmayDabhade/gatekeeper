@@ -110,6 +110,16 @@ def test_send_allowed_attaches_exact_bytes(env):
     assert msg["To"] == "boss@ourcompany.com"
 
 
+def test_send_carries_the_device_approval_for_the_verifier(env):
+    import verifier
+    res = env["ex"].send_email("boss@ourcompany.com", env["q3"], "low")
+    req = env["dev"].requests[-1]
+    a, err = verifier.read_approval(env["sent"][0])
+    assert err is None
+    assert a == {k: req[k] for k in verifier.FIELDS if k != "sig"} | {"sig": a["sig"]}
+    assert a["sig"] == env["dev"].sign(req) and res["approval"] == a
+
+
 def test_send_without_attachment_uses_empty_file_and_fh(env):
     r = env["ex"].send_email("boss@ourcompany.com", "", "low", body="hello")
     assert r["ok"]
