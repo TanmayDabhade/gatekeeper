@@ -10,7 +10,8 @@ Milestones: F = firmware (device owner), M = software. Feature freeze at **hour 
 - [ ] M4–M5: run `bench.py --agent llm` once a provider is chosen and put the real hijack rate in the Devpost
 - [x] M6: Nessie `pay_invoice` (contract v2) on the mock + executor + agent + bench; per CONTRACT v2; verified live against the Nessie sandbox (DECISIONS 16:45)
 - [ ] M6: `llm.py` will likely hit the same macOS Python CA-certificate error over HTTPS that `nessie.py` now works around; check it on the first live LLM run
-- [ ] M7: ElevenLabs speaks the true action on block/lock (e.g. "Blocked: sending tax_return.pdf to compliance-archive.io"), not just an alarm
+- [x] M7: ElevenLabs voice on the device (`src/voice.cpp`, DECISIONS 17:45): speaks the validated action on HOLD / BLOCKED / LOCKED. Compiles with and without secrets
+- [ ] M7 hardware: wire a MAX98357A + speaker (BCLK 14, LRC 17, DIN 16, VIN 5V, GND), create `include/secrets.h`, flash, and check it speaks on a real request (device owner reviews the firmware change first)
 - [ ] Update your status rows in the KT doc
 
 ## Teammate (device: firmware/)
