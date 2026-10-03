@@ -19,7 +19,8 @@ Milestones: F = firmware (device owner), M = software. Feature freeze at **hour 
 - [ ] Copy the enrolled RFID card UID into the firmware
 
 ## Unassigned
-- [ ] Separate verifier process (bank or mail gateway) plus a forged-request demo. Review priority #3; answers the judges' biggest question.
+- [x] M9: separate verifier (`verifier.py`, a mail gateway) plus a forged-request demo (`forge.py`): 7 forgeries + a replay rejected, only the device-signed control delivered. Verified live against the mock + Mailpit
+- [ ] M9 on the board: run `verifier.py` + `forge.py` with `GATEKEEPER_PORT` set (the gateway must trust the board's pinned key)
 - [ ] Decide the taint scope and the lie-check severity tiers (see `IDEA.md` → Open questions)
 - [ ] "New recipient" warning on the OLED
 - [ ] Decide on the delete-rate gap the benchmark found (atk-07): 5 non-sensitive deletes per 10 min are auto-signed, so an injection can wipe a small public folder. A fix is a firmware + mock policy change (DECISIONS first)

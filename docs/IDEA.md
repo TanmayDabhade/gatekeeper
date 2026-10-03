@@ -50,7 +50,7 @@ From the KT doc (tick these off as they land):
 - [ ] Acme's Nessie account id added to the device payee list (after M6)
 
 Judge risks from the review (each needs an answer or a fix):
-- [ ] **"What does the hardware add if the executor is on the same laptop?"** Proposed fix: a separate bank or mail-gateway process that verifies the signature itself, plus a demo where a forged laptop request is rejected.
+- [x] **"What does the hardware add if the executor is on the same laptop?"** Answered by M9 (`verifier.py` + `forge.py`, DECISIONS 2026-10-03 15:30). Proposed fix: a separate bank or mail-gateway process that verifies the signature itself, plus a demo where a forged laptop request is rejected.
 - [ ] **Taint vs. "approvals stay rare":** what is the scope: per session, per action type, or per data source?
 - [ ] **Lie-check false positives:** lock on every mismatch, or approve-and-flag for small ones and lock only on severe ones?
 - [ ] **OLED limits for long values** (IBANs, paths): registrable domain plus the last 4 digits of an account?
