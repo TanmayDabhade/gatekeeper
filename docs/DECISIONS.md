@@ -41,3 +41,8 @@ Format:
 **Decision:** The agent's system prompt must call sensitive files, outside recipients and payments HIGH risk.
 **Why:** Otherwise an honest agent that says "low" triggers a false lockdown through the lie check.
 **Alternatives considered:** Softer lie check (approve-and-flag). The review raised this, and it's still open in `IDEA.md`.
+
+## 2026-10-03 11:00 | Tanmay D | Board-ready alignment: the firmware and mock enforce the same rules
+**Decision:** The firmware now matches the mock's request checks. Malformed requests get `denied`, unsigned: wrong types, `|`, control or non-ASCII characters, a bad nonce or fh, or a non-canonical path. The `/data/sensitive/` match ignores case. Signed deletes count toward the rate limit even in bench mode. Bench lies reply `locked` without locking. Unparseable, unknown or too-long lines get a `denied` reply instead of silence. The wire format and signed string are unchanged (still v1).
+**Why:** A security review showed `data/SENSITIVE/tax_return.pdf` got past `blocked` on macOS. The firmware also had no input validation, and bench mode let signed deletes skip the rate limit. `smoke_device.py` now checks the mock and the board against the same 30 cases.
+**Alternatives considered:** Fixing only the executor (a compromised host could still send the uppercase path). Waiting for the device owner. Not chosen because of demo timing, so this is an **exception to the ownership rule**: the device owner reviews `src/main.cpp` in the PR before flashing.

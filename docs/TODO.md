@@ -3,9 +3,9 @@
 Milestones: F = firmware (device owner), M = software. Feature freeze at **hour 19**.
 
 ## Tanmay (software: executor/, agent/, bench/)
-- [ ] M2 executor: open the port with `dtr=False, rts=False` (otherwise the ESP32 reboots on connect)
-- [ ] M2 executor: skip reply lines that don't start with `{` (ESP32 boot messages)
-- [ ] Mock: unknown `act` should return `blocked` like the firmware (it currently returns `denied` as malformed)
+- [x] M2 executor: open the port with `dtr=False, rts=False` (otherwise the ESP32 reboots on connect)
+- [x] M2 executor: skip reply lines that don't start with `{` (ESP32 boot messages)
+- [x] Mock matches the firmware verdict for verdict (`test_mock_device.py`)
 - [ ] M3: agent loop with large-text narration; the system prompt defines HIGH risk
 - [ ] M4–M5: scenarios plus a benchmark (20–30 attacks, 20 benign; hijack rate, blocked rate, false positives, touches per 100, latency)
 - [ ] M6: Nessie `pay_invoice` (contract v2)
@@ -13,7 +13,8 @@ Milestones: F = firmware (device owner), M = software. Feature freeze at **hour 
 - [ ] Update your status rows in the KT doc
 
 ## Teammate (device: firmware/)
-- [ ] F4: RFID co-sign, buzzer, v2 payments
+- [ ] Review the firmware changes in the board-ready PR (validation, case-insensitive sensitive check, bench deletes count, always reply), then flash and run `smoke_device.py` on the board (expect 30/30)
+- [ ] F4: RFID co-sign, buzzer, v2 payments (put the subject/body hash `bh` in v2 too, see DECISIONS)
 - [ ] F5: enclosure, spare board
 - [ ] Copy the enrolled RFID card UID into the firmware
 
