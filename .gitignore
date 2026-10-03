@@ -14,3 +14,4 @@ bench_results/
 .vscode/ipch
 .gateway_nonces
 .bank_nonces
+data/inbox_live.json
