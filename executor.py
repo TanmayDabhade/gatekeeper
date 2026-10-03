@@ -58,12 +58,19 @@ class DeviceLink:
             self.port = port
             return
         try:
+            # Open with DTR/RTS deasserted so opening the port doesn't pull the
+            # ESP32 into reset (the usbserial auto-reset lines). Harmless/no-op
+            # for socket:// and other backends without real control lines.
             self.port = serial.serial_for_url(url, baudrate=SERIAL_BAUD, timeout=timeout,
-                                              do_not_open=True)
-            self.port.dtr = False
-            self.port.rts = False
+                                              do_not_open=True, dsrdtr=False)
+            for line in ("dtr", "rts"):
+                try:
+                    setattr(self.port, line, False)
+                except (ValueError, AttributeError, OSError):
+                    pass
             self.port.open()
-        except (serial.SerialException, OSError, ValueError) as e:
+            time.sleep(0.3)   # let the usbserial adapter settle before the first write
+        except (serial.SerialException, OSError) as e:
             raise DeviceError(f"cannot open device at {url}: {e}") from e
         if settle_s is None:
             settle_s = 0 if url.startswith(("socket://", "loop://")) else 2.0
