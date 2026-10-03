@@ -34,6 +34,13 @@ UPSTREAM_SMTP_PORT = 1025       # where the gateway relays verified mail (Mailpi
 GATEWAY_HOST = "127.0.0.1"
 GATEWAY_PORT = 1026
 GATEWAY_NONCES = os.path.join(BASE_DIR, ".gateway_nonces")   # used approvals, survives restarts
+
+# M9 bank: a separate process that verifies the device signature, then pays through Nessie.
+# The executor only knows this URL; the Nessie key lives with the bank.
+BANK_HOST = "127.0.0.1"
+BANK_PORT = 8099
+BANK_URL = os.environ.get("GATEKEEPER_BANK_URL", f"http://{BANK_HOST}:{BANK_PORT}")
+BANK_NONCES = os.path.join(BASE_DIR, ".bank_nonces")        # its own store: separate trust domain
 MAILPIT_UI = "http://localhost:8025"
 SENDER = "assistant@ourcompany.com"
 

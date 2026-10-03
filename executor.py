@@ -7,7 +7,8 @@ Every send_email / delete_file / pay_invoice goes to the device first and is car
   - the request hasn't expired,
   - the file still resolves to the same real path with the same SHA-256.
 Contract v2 (docs/CONTRACT.md) also signs the email's subject+body hash and a payment's amount
-in cents, so an approval for $250 can't move $2,500. Only then does Nessie see the payment.
+in cents, so an approval for $250 can't move $2,500. Payments then go to the bank (bank.py, a separate
+process), which re-checks the signature itself before Nessie moves anything.
 The caller never chooses taint: it comes from what read_inbox has seen.
 """
 import email.utils
@@ -19,6 +20,8 @@ import secrets
 import smtplib
 import subprocess
 import time
+import urllib.error
+import urllib.request
 from email.message import EmailMessage
 
 import serial
@@ -27,9 +30,9 @@ from nacl.signing import VerifyKey
 
 import protocol
 import verifier
-from config import (COMPANY_DOMAIN, DATA_DIR, DEVICE_PORT, DEVICE_TIMEOUT_S, DOCKER_IMAGE,
-                    INBOX_PATH, NESSIE_COMPANY_ACCOUNT, PUBKEY_PATH, REQUEST_TTL_S,
-                    RUN_CODE_TIMEOUT_S, SENDER, SERIAL_BAUD, SMTP_HOST, SMTP_PORT)
+from config import (BANK_URL, COMPANY_DOMAIN, DATA_DIR, DEVICE_PORT, DEVICE_TIMEOUT_S,
+                    DOCKER_IMAGE, INBOX_PATH, PUBKEY_PATH, REQUEST_TTL_S, RUN_CODE_TIMEOUT_S,
+                    SENDER, SERIAL_BAUD, SMTP_HOST, SMTP_PORT)
 
 HEX64 = re.compile(r"[0-9a-f]{64}")
 HEX128 = re.compile(r"[0-9a-f]{128}")
@@ -145,9 +148,28 @@ def _smtp_send(msg):
         s.send_message(msg)
 
 
-def _nessie_pay(payee, cents, memo, ref):
-    import nessie                   # only needed when a payment is actually signed
-    return nessie.Nessie().pay(NESSIE_COMPANY_ACCOUNT, payee, cents, memo, ref)
+class BankRefused(Exception):
+    """The bank didn't pay: it rejected the approval or couldn't move the money."""
+
+
+def _bank_pay(payee, cents, memo, approval):
+    """Ask the bank (bank.py, a separate process) to pay. The bank checks the device signature
+    itself; this laptop never holds the Nessie key."""
+    body = json.dumps({"payee": payee, "amount_cents": cents, "memo": memo,
+                       "approval": approval}).encode()
+    req = urllib.request.Request(f"{BANK_URL}/pay", data=body, method="POST",
+                                 headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            return json.loads(r.read())["transfer"]
+    except urllib.error.HTTPError as e:
+        try:
+            reason = json.loads(e.read()).get("reason", "")
+        except ValueError:
+            reason = ""
+        raise BankRefused(f"bank refused ({e.code}): {reason}") from e
+    except (urllib.error.URLError, OSError) as e:
+        raise BankRefused(f"bank unreachable at {BANK_URL} (start python bank.py): {e}") from e
 
 
 # ---------------------------------------------------------------- sandbox
@@ -192,14 +214,14 @@ def run_code(code, runner=subprocess.run):
 class Executor:
     def __init__(self, link, verify_key, data_dir=DATA_DIR, inbox_path=INBOX_PATH, bench=0,
                  smtp_send=_smtp_send, clock=time.time, company_domain=COMPANY_DOMAIN,
-                 pay=_nessie_pay):
+                 pay=_bank_pay):
         self.link = link
         self.vk = verify_key
         self.data_dir = os.path.realpath(data_dir)
         self.inbox_path = inbox_path
         self.bench = bench
         self.smtp_send = smtp_send
-        self.pay = pay              # pay(payee, cents, memo, ref) -> Nessie record ids
+        self.pay = pay              # pay(payee, cents, memo, approval) -> Nessie record ids
         self.clock = clock
         self.company_domain = company_domain.lower()
         self._taint = 0
@@ -280,8 +302,8 @@ class Executor:
         if not res["ok"]:
             return res
         try:
-            res["transfer"] = self.pay(payee, amount_cents, memo, res["nonce"][:12])
-        except Exception as e:      # noqa: BLE001 -- any Nessie failure means "not paid"
+            res["transfer"] = self.pay(payee, amount_cents, memo, res["approval"])
+        except Exception as e:      # noqa: BLE001 -- any bank failure means "not paid"
             return _result(False, "error", f"approved but the payment failed: {e}")
         return res
 
@@ -339,5 +361,5 @@ class Executor:
             return _result(False, "refused", "approval expired")
         # Everything a separate verifier needs to check the device's signature on its own.
         approval = {"act": act, "to": to, "file": path, "fh": fh, "bh": bh, "amt": amt,
-                    "nonce": nonce, "exp": exp, "taint": taint, "sig": sig}
+                    "nonce": nonce, "exp": exp, "taint": taint, "sig": sig, "v": v}
         return _result(True, v, "signed", nonce=nonce, approval=approval)

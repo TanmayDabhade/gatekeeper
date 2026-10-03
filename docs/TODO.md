@@ -22,6 +22,7 @@ Milestones: F = firmware (device owner), M = software. Feature freeze at **hour 
 
 ## Unassigned
 - [x] M9: separate verifier (`verifier.py`, a mail gateway) plus a forged-request demo (`forge.py`): 7 forgeries + a replay rejected, only the device-signed control delivered. Verified live against the mock + Mailpit
+- [x] M9 bank: `bank.py` verifies the device signature before Nessie moves money, and `demo_forge.py` shows legit → paid, forged / tampered / replayed → $0 (verified live against the mock + Nessie)
 - [ ] M9 on the board: run `verifier.py` + `forge.py` with `GATEKEEPER_PORT` set (the gateway must trust the board's pinned key)
 - [ ] Decide the taint scope and the lie-check severity tiers (see `IDEA.md` → Open questions)
 - [ ] "New recipient" warning on the OLED
