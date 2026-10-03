@@ -6,10 +6,19 @@
 #include <Preferences.h>
 #include "monocypher.h"
 #include "monocypher-ed25519.h"
+#include <SPI.h>
+#include <MFRC522.h>
 
 Adafruit_SSD1306 display(128, 64, &Wire, -1);
 Preferences prefs;
 String lineBuf;
+
+// ---------- RFID co-sign (F4) ----------
+// RC522 clone: SS=5, RST tied to 3.3V (soft reset), SPI 18/19/23. VersionReg reads 0x18.
+MFRC522 rfid(5, MFRC522::UNUSED_PIN);
+const uint8_t ENROLLED_UID[] = {0x20, 0x11, 0x1B, 0x5C}; // the card that co-signs large payments
+const uint8_t ENROLLED_UID_LEN = sizeof(ENROLLED_UID);
+int waitForCardTap(unsigned long timeoutMs); // defined below; used by the payment co-sign
 
 // ---------- pins ----------
 const int BTN_APPROVE = 13, BTN_KILL = 27, BTN_RESET = 26;
@@ -24,6 +33,13 @@ const int DELETE_LIMIT = 5;
 
 const char *CONTACTS[] = {"boss@ourcompany.com", "accountant@trustedcpa.com"};
 const int NUM_CONTACTS = 2;
+
+// F4: pay_invoice payee allowlist (ids must match mock_device.PAYEES; name is for the OLED)
+struct Payee { const char *id; const char *name; };
+const Payee PAYEES[] = {{"7083a93b-e422-4fa6-8188-330034f0c237", "Acme Supplies"}};
+const int NUM_PAYEES = 1;
+const uint32_t COSIGN_THRESHOLD_CENTS = 50000;  // payments over $500 need an RFID co-sign (S3)
+const uint32_t MAX_AMOUNT_CENTS = 100000000;    // $1,000,000; anything bigger is malformed
 
 // ---------- state ----------
 uint8_t secretKey[64];
@@ -134,6 +150,29 @@ bool isContact(const String &to)
   return false;
 }
 
+bool isPayee(const String &to)
+{
+  for (int i = 0; i < NUM_PAYEES; i++)
+    if (to == PAYEES[i].id)
+      return true;
+  return false;
+}
+
+String payeeName(const String &to)
+{
+  for (int i = 0; i < NUM_PAYEES; i++)
+    if (to == PAYEES[i].id)
+      return PAYEES[i].name;
+  return to; // unknown payees are blocked anyway; show the raw id
+}
+
+String dollars(uint32_t cents)
+{
+  char buf[20];
+  snprintf(buf, sizeof(buf), "$%u.%02u", cents / 100, cents % 100);
+  return String(buf);
+}
+
 bool isSensitive(const String &file)
 {
   // Case-insensitive: on macOS data/SENSITIVE/x.pdf opens the same file as data/sensitive/x.pdf
@@ -181,6 +220,12 @@ Verdict policy(const String &act, const String &to, const String &file, int tain
       return V_APPROVE;
     return V_ALLOW;
   }
+  if (act == "pay_invoice")
+  {
+    if (!isPayee(to))
+      return V_BLOCK;  // unknown payee: fail closed
+    return V_APPROVE;  // a listed payee always needs a human (co-sign if > $500, in handleReq)
+  }
   return V_BLOCK; // unknown action: fail closed
 }
 
@@ -199,7 +244,7 @@ void drawIdle()
 }
 
 void drawRequest(const char *verdict, const String &act, const String &to,
-                 const String &file, const String &claim, bool tainted)
+                 const String &file, const String &claim, bool tainted, uint32_t amt = 0)
 {
   display.clearDisplay();
   display.setTextColor(SSD1306_WHITE);
@@ -217,6 +262,19 @@ void drawRequest(const char *verdict, const String &act, const String &to,
   {
     display.setCursor(128 - 7 * 6, 18);
     display.print("TAINTED");
+  }
+  if (act == "pay_invoice")
+  {
+    display.setTextSize(2);
+    display.setCursor(0, 28);
+    display.print(dollars(amt)); // the amount is the thing the AI can't lie about
+    display.setTextSize(1);
+    display.setCursor(0, 46);
+    display.print("to: " + payeeName(to));
+    display.setCursor(0, 56);
+    display.print(isPayee(to) ? ("claim: " + claim) : String("! UNKNOWN PAYEE"));
+    display.display();
+    return;
   }
   if (to.length())
   {
@@ -364,7 +422,7 @@ bool isLowerHex(const String &s, unsigned n)
 // Returns nullptr if the request is well-formed, else the reason.
 const char *validateReq(JsonDocument &doc)
 {
-  const char *strs[] = {"act", "to", "file", "fh", "claim", "nonce"};
+  const char *strs[] = {"act", "to", "file", "fh", "bh", "claim", "nonce"};
   for (const char *k : strs)
   {
     if (!doc[k].is<const char *>())
@@ -372,7 +430,7 @@ const char *validateReq(JsonDocument &doc)
     if (!cleanField(doc[k].as<String>()))
       return "forbidden characters";
   }
-  const char *ints[] = {"exp", "taint", "bench"};
+  const char *ints[] = {"exp", "taint", "bench", "amt"};
   for (const char *k : ints)
   {
     if (!doc[k].is<long long>())
@@ -381,13 +439,16 @@ const char *validateReq(JsonDocument &doc)
   String act = doc["act"].as<String>(), to = doc["to"].as<String>();
   String file = doc["file"].as<String>(), fh = doc["fh"].as<String>();
   String claim = doc["claim"].as<String>(), nonce = doc["nonce"].as<String>();
-  long long taint = doc["taint"], bench = doc["bench"], exp = doc["exp"];
+  String bh = doc["bh"].as<String>();
+  long long taint = doc["taint"], bench = doc["bench"], exp = doc["exp"], amt = doc["amt"];
   if (claim != "low" && claim != "medium" && claim != "high")
     return "bad claim";
   if ((taint != 0 && taint != 1) || (bench != 0 && bench != 1))
     return "taint/bench must be 0 or 1";
   if (exp < 0 || exp > 0xFFFFFFFFLL)
     return "bad exp";
+  if (amt < 0 || amt > 0xFFFFFFFFLL)
+    return "bad amt";
   if (!isLowerHex(nonce, 32))
     return "bad nonce";
   if (act == "delete_file")
@@ -404,6 +465,27 @@ const char *validateReq(JsonDocument &doc)
     if (file.length() && !file.startsWith("/"))
       return "file must be an absolute path";
   }
+  else if (act == "pay_invoice")
+  {
+    if (to.length() < 1 || to.length() > 64)
+      return "bad payee id";
+    for (unsigned i = 0; i < to.length(); i++)
+      if (!isAlphaNumeric(to[i]) && to[i] != '-') // payee id: [A-Za-z0-9-]{1,64}
+        return "bad payee id";
+    if (file.length() || fh.length())
+      return "pay_invoice has no file";
+    if (amt <= 0 || amt > MAX_AMOUNT_CENTS)
+      return "bad amt";
+  }
+  if (act != "pay_invoice" && amt != 0)
+    return "amt only for pay_invoice";
+  if (act == "send_email")
+  {
+    if (!isLowerHex(bh, 64)) // v2: send_email always carries a 64-hex body hash
+      return "bad bh";
+  }
+  else if (bh.length())
+    return "bh only for send_email";
   if (file.indexOf("/../") >= 0 || file.indexOf("/./") >= 0 || file.indexOf("//") >= 0)
     return "file must be a canonical path";
   if (file.length() ? !isLowerHex(fh, 64) : fh.length() != 0)
@@ -440,9 +522,11 @@ void handleReq(JsonDocument &doc)
   uint32_t exp = doc["exp"].as<uint32_t>();
   int taint = doc["taint"] | 0;
   bool bench = (doc["bench"] | 0) == 1;
+  String bh = doc["bh"] | "";
+  uint32_t amt = doc["amt"].as<uint32_t>();
 
-  String msg = "v1|" + act + "|" + to + "|" + file + "|" + fh + "|" +
-               nonce + "|" + String(exp) + "|" + String(taint);
+  String msg = "v2|" + act + "|" + to + "|" + file + "|" + fh + "|" + bh + "|" +
+               String(amt) + "|" + nonce + "|" + String(exp) + "|" + String(taint);
 
   if (killActive || sessionLocked)
   {
@@ -476,7 +560,7 @@ void handleReq(JsonDocument &doc)
   {
     sessionLocked = true;
     setLed(true, false, false);
-    drawRequest("LOCKED", act, to, file, claim, taint == 1);
+    drawRequest("LOCKED", act, to, file, claim, taint == 1, amt);
     sendRes(nonce, "locked", "");
     return; // incident stays on screen until RESET is held
   }
@@ -484,7 +568,7 @@ void handleReq(JsonDocument &doc)
   if (v == V_BLOCK)
   {
     setLed(true, false, false);
-    drawRequest("BLOCKED", act, to, file, claim, taint == 1);
+    drawRequest("BLOCKED", act, to, file, claim, taint == 1, amt);
     sendRes(nonce, "blocked", "");
     delay(2500);
     showHome();
@@ -494,7 +578,7 @@ void handleReq(JsonDocument &doc)
   if (v == V_ALLOW)
   {
     setLed(false, true, false);
-    drawRequest("ALLOWED", act, to, file, claim, taint == 1);
+    drawRequest("ALLOWED", act, to, file, claim, taint == 1, amt);
     sendRes(nonce, "allow", signMsg(msg));
     if (act == "delete_file")
       recordDelete();
@@ -504,10 +588,25 @@ void handleReq(JsonDocument &doc)
   }
 
   // Needs a human
-  drawRequest("HOLD TO OK", act, to, file, claim, taint == 1);
+  drawRequest("HOLD TO OK", act, to, file, claim, taint == 1, amt);
   int d = waitForHold();
   if (d == 1)
   {
+    if (act == "pay_invoice" && amt > COSIGN_THRESHOLD_CENTS)
+    {
+      String p = "Tap card  $" + String(amt / 100);
+      drawResult("CO-SIGN", p.c_str());
+      int c = waitForCardTap(15000);
+      if (c != 1)
+      {
+        sendRes(nonce, "denied", "");
+        setLed(true, false, false);
+        drawResult("NO CO-SIGN", c == -1 ? "Wrong card" : "No tap");
+        delay(1500);
+        showHome();
+        return;
+      }
+    }
     sendRes(nonce, "approved", signMsg(msg));
     if (act == "delete_file")
       recordDelete();
@@ -522,6 +621,42 @@ void handleReq(JsonDocument &doc)
   }
   delay(1500);
   showHome();
+}
+
+// ---------- RFID co-sign (F4) ----------
+String uidHex() // the UID of the last card read, as AA:BB:CC:DD
+{
+  String s;
+  for (byte i = 0; i < rfid.uid.size; i++)
+  {
+    if (i)
+      s += ":";
+    if (rfid.uid.uidByte[i] < 0x10)
+      s += "0";
+    s += String(rfid.uid.uidByte[i], HEX);
+  }
+  s.toUpperCase();
+  return s;
+}
+
+// Wait up to timeoutMs for a card. 1 = enrolled card, -1 = a different card, 0 = timeout.
+int waitForCardTap(unsigned long timeoutMs)
+{
+  unsigned long start = millis();
+  while (millis() - start < timeoutMs)
+  {
+    if (rfid.PICC_IsNewCardPresent() && rfid.PICC_ReadCardSerial())
+    {
+      bool match = (rfid.uid.size == ENROLLED_UID_LEN);
+      for (byte i = 0; match && i < rfid.uid.size; i++)
+        if (rfid.uid.uidByte[i] != ENROLLED_UID[i])
+          match = false;
+      rfid.PICC_HaltA();
+      return match ? 1 : -1;
+    }
+    delay(20);
+  }
+  return 0;
 }
 
 void handleLine(const String &line)
@@ -552,6 +687,19 @@ void handleLine(const String &line)
   else if (strcmp(t, "req") == 0)
   {
     handleReq(doc);
+  }
+  else if (strcmp(t, "cosign") == 0)
+  {
+    // F4 bring-up: tap a card within 8s; reports if it's the enrolled co-sign card.
+    drawResult("TAP CARD", "co-sign test (8s)");
+    int r = waitForCardTap(8000);
+    JsonDocument res;
+    res["t"] = "cosign";
+    res["match"] = (r == 1);
+    res["uid"] = (r == 0) ? "none" : uidHex();
+    serializeJson(res, Serial);
+    Serial.println();
+    showHome();
   }
   else
   {
@@ -606,6 +754,9 @@ void setup()
   pinMode(LED_R, OUTPUT);
   pinMode(LED_G, OUTPUT);
   pinMode(LED_B, OUTPUT);
+
+  SPI.begin(18, 19, 23, 5); // SCK, MISO, MOSI, SS
+  rfid.PCD_Init();
 
   loadOrCreateKey();
   showHome();
