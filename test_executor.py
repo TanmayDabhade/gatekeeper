@@ -32,7 +32,8 @@ class FakeDevice:
 
     def sign(self, req, sk=None):
         msg = protocol.signed_message(req["act"], req["to"], req["file"], req["fh"],
-                                      req["nonce"], req["exp"], req["taint"])
+                                      req["nonce"], req["exp"], req["taint"],
+                                      req["amt"], req["bh"])
         return (sk or self.sk).sign(msg).signature.hex()
 
     def call(self, obj):
@@ -59,10 +60,14 @@ def env(tmp_path):
         {"id": "1", "from": "Dana <boss@ourcompany.com>", "subject": "hi", "body": "x"},
     ]))
     dev = FakeDevice()
-    sent = []
+    sent, paid = [], []
+    def pay(payee, cents, memo, ref):
+        paid.append((payee, cents, memo, ref))
+        return {"withdrawal": "w1", "deposit": "d1"}
     ex = executor.Executor(dev, dev.sk.verify_key, data_dir=str(data),
-                           inbox_path=str(inbox), smtp_send=sent.append)
+                           inbox_path=str(inbox), smtp_send=sent.append, pay=pay)
     return {"tmp": tmp_path, "data": data, "inbox": inbox, "dev": dev, "sent": sent, "ex": ex,
+            "paid": paid,
             "q3": str(data / "public" / "q3.pdf"), "tax": str(data / "sensitive" / "tax.pdf")}
 
 
@@ -437,3 +442,95 @@ def test_link_opens_with_dtr_rts_low(monkeypatch):
     executor.DeviceLink("/dev/cu.usbserial-0001", settle_s=0)
     assert seen["dtr"] is False and seen["rts"] is False   # set BEFORE open: no reboot
     assert seen["do_not_open"] is True
+
+
+# ---------------------------------------------------------------- payments (v2)
+
+ACME = "7083a93b-e422-4fa6-8188-330034f0c237"
+
+
+def test_pay_signed_moves_exact_amount(env):
+    res = env["ex"].pay_invoice(ACME, 25000, "INV-2290")
+    req = env["dev"].requests[-1]
+    assert (req["act"], req["to"], req["file"], req["fh"], req["amt"]) == \
+        ("pay_invoice", ACME, "", "", 25000)
+    assert req["bh"] == ""                  # CONTRACT: bh is only for send_email
+    assert res["ok"] and res["transfer"] == {"withdrawal": "w1", "deposit": "d1"}
+    assert env["paid"] == [(ACME, 25000, "INV-2290", res["nonce"][:12])]
+    assert res["approval"]["amt"] == 25000 and res["approval"]["bh"] == req["bh"]
+
+
+@pytest.mark.parametrize("field, value", [("amt", 2500000), ("bh", "0" * 64), ("to", "evil")])
+def test_pay_signature_over_other_values_refused(env, field, value):
+    env["dev"].reply = lambda req, res: dict(res, sig=env["dev"].sign(dict(req, **{field: value})))
+    res = env["ex"].pay_invoice(ACME, 25000, "INV-2290")
+    assert (res["ok"], res["verdict"]) == (False, "refused")
+    assert env["paid"] == []
+
+
+@pytest.mark.parametrize("verdict", ["blocked", "hold", "denied", "locked"])
+def test_pay_unsigned_verdict_moves_nothing(env, verdict):
+    env["dev"].decide = lambda req: verdict
+    res = env["ex"].pay_invoice(ACME, 25000)
+    assert (res["ok"], res["verdict"]) == (False, verdict)
+    assert env["paid"] == []
+
+
+def test_pay_v1_signature_refused(env):
+    """A retired v1-style signature (no amount) must not authorize a payment."""
+    def v1(req, res):
+        msg = f"v1|{req['act']}|{req['to']}|||{req['nonce']}|{req['exp']}|{req['taint']}".encode()
+        return dict(res, sig=env["dev"].sk.sign(msg).signature.hex())
+    env["dev"].reply = v1
+    assert not env["ex"].pay_invoice(ACME, 25000)["ok"]
+    assert env["paid"] == []
+
+
+@pytest.mark.parametrize("payee, amt, memo, why", [
+    ("acme supplies", 25000, "", "payee"),
+    ("a" * 65, 25000, "", "payee"),
+    (ACME, 0, "", "amount_cents"),
+    (ACME, -5, "", "amount_cents"),
+    (ACME, 250.0, "", "amount_cents"),
+    (ACME, True, "", "amount_cents"),
+    (ACME, 100_000_001, "", "amount_cents"),
+    (ACME, 25000, "x" * 501, "memo"),
+])
+def test_pay_bad_input_rejected_before_device(env, payee, amt, memo, why):
+    res = env["ex"].pay_invoice(payee, amt, memo)
+    assert res["verdict"] == "rejected" and why in res["detail"]
+    assert env["dev"].requests == []
+
+
+def test_pay_nessie_failure_is_error_not_success(env):
+    def down(*a):
+        raise OSError("Nessie unreachable")
+    env["ex"].pay = down
+    res = env["ex"].pay_invoice(ACME, 25000)
+    assert (res["ok"], res["verdict"]) == (False, "error") and "unreachable" in res["detail"]
+
+
+def test_send_signs_the_subject_and_body_hash(env):
+    env["ex"].send_email("boss@ourcompany.com", env["q3"], "low", "Q3", "Here it is")
+    req = env["dev"].requests[-1]
+    assert (req["amt"], req["bh"]) == (0, protocol.body_hash("Q3", "Here it is\n"))
+    assert env["sent"][0].get_body(("plain",)).get_content() == "Here it is\n"
+
+
+def test_signature_over_a_different_body_refused(env):
+    env["dev"].reply = lambda req, res: dict(res, sig=env["dev"].sign(dict(req, bh="0" * 64)))
+    res = env["ex"].send_email("boss@ourcompany.com", env["q3"], "low", "Q3", "hi")
+    assert (res["ok"], res["verdict"]) == (False, "refused") and env["sent"] == []
+
+
+def test_delete_carries_empty_bh_and_zero_amt(env):
+    env["ex"].delete_file(env["q3"], "low")
+    req = env["dev"].requests[-1]
+    assert (req["amt"], req["bh"]) == (0, "")
+
+
+def test_signed_message_is_contract_v2():
+    assert protocol.signed_message("pay_invoice", "p", "", "", "n", 5, 0, 25000, "") == \
+        b"v2|pay_invoice|p||||25000|n|5|0"
+    assert protocol.signed_message("send_email", "a@b.co", "/f", "fh", "n", 5, 1, 0, "bh") == \
+        b"v2|send_email|a@b.co|/f|fh|bh|0|n|5|1"

@@ -6,14 +6,14 @@
 The executor attaches the device's approval to each email as X-Gatekeeper-* headers. The
 gateway relays a message only if the signature verifies under the PINNED device key over
 protocol.signed_message(...) and the signed fields match what is actually being delivered:
-the one envelope recipient, the attachment's name and SHA-256, an unexpired exp and a nonce
+the one envelope recipient, the subject and body (bh), the attachment's name and SHA-256, an
+unexpired exp and a nonce
 never used before (kept on disk, so a restart doesn't reopen replays). The message must have
 exactly the shape the executor sends, so nothing can hide in parts this check doesn't read. So a compromised laptop can't send mail the device didn't sign, even with the
 executor's code. In production this runs at the mail provider or bank; here Mailpit stands in,
 and only the gateway should be able to reach it. forge.py is the demo.
 
-Known limit (v1): subject and body aren't signed, so a valid approval could carry a different
-text. The v2 contract adds a body hash `bh` (see DECISIONS).
+Contract v2 signs bh, the hash of the subject and body, so the text can't be swapped either.
 """
 import argparse
 import email
@@ -35,7 +35,7 @@ import protocol
 from config import (GATEWAY_HOST, GATEWAY_NONCES, GATEWAY_PORT, PUBKEY_PATH, SMTP_HOST,
                     UPSTREAM_SMTP_PORT)
 
-FIELDS = ("act", "to", "file", "fh", "nonce", "exp", "taint", "sig")
+FIELDS = ("act", "to", "file", "fh", "bh", "amt", "nonce", "exp", "taint", "sig")
 HEADER = "X-Gatekeeper-"
 HEX64 = re.compile(r"[0-9a-f]{64}")
 HEX128 = re.compile(r"[0-9a-f]{128}")
@@ -67,7 +67,7 @@ def read_approval(msg):
             return None, ("no device approval on this message" if not vals
                           else f"duplicate {HEADER}{k.capitalize()} header")
         a[k] = str(vals[0]).strip()
-    for k in ("exp", "taint"):
+    for k in ("amt", "exp", "taint"):
         if not re.fullmatch(r"-?[0-9]{1,12}", a[k]):
             return None, f"approval {k} is not an integer"
         a[k] = int(a[k])
@@ -160,7 +160,7 @@ class Verifier:
         if not HEX128.fullmatch(a["sig"]):
             return False, "malformed signature", None
         signed = protocol.signed_message(a["act"], a["to"], a["file"], a["fh"], a["nonce"],
-                                         a["exp"], a["taint"])
+                                         a["exp"], a["taint"], a["amt"], a["bh"])
         try:
             self.vk.verify(signed, bytes.fromhex(a["sig"]))
         except BadSignatureError:
@@ -175,6 +175,9 @@ class Verifier:
         att, err = _attachment(msg, a)
         if err:
             return False, err, None
+        text = (msg if not msg.is_multipart() else next(msg.iter_parts())).get_content()
+        if protocol.body_hash(str(msg["Subject"] or ""), text.replace("\r\n", "\n")) != a["bh"]:
+            return False, "subject or body is not what the device approved", None
         if att is not None:
             data = att.get_content()
             data = data.encode() if isinstance(data, str) else data

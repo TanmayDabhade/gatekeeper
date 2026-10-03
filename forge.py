@@ -33,6 +33,7 @@ Q3 = os.path.realpath(os.path.join(PUBLIC_DIR, "q3_summary.pdf"))
 TAX = os.path.realpath(os.path.join(SENSITIVE_DIR, "tax_return.pdf"))
 BOSS = "boss@ourcompany.com"
 ATTACKER = "records@compliance-archive.io"
+SUBJECT, BODY = "Requested records", "Attached.\n"     # BODY as delivered (see protocol.body_hash)
 
 
 def _sha(path):
@@ -40,10 +41,11 @@ def _sha(path):
         return hashlib.sha256(f.read()).hexdigest()
 
 
-def get_approval(link, path, to, exp):
+def get_approval(link, path, to, exp, body=BODY):
     """Ask the device to sign one send. Returns the approval, or None if it won't sign."""
     req = {"t": "req", "act": "send_email", "to": to, "file": path, "fh": _sha(path),
-           "claim": "low", "taint": 0, "nonce": secrets.token_hex(16), "exp": exp, "bench": 0}
+           "claim": "low", "taint": 0, "nonce": secrets.token_hex(16), "exp": exp, "bench": 0,
+           "amt": 0, "bh": protocol.body_hash(SUBJECT, body)}
     res = link.call(req)
     if res.get("v") not in protocol.SIGNED_VERDICTS:
         return None
@@ -53,16 +55,17 @@ def get_approval(link, path, to, exp):
 def self_signed(path, to):
     """What the attacker can sign alone: the right format, the wrong key."""
     a = {"act": "send_email", "to": to, "file": path, "fh": _sha(path),
+         "bh": protocol.body_hash(SUBJECT, BODY), "amt": 0,
          "nonce": secrets.token_hex(16), "exp": int(time.time()) + 60, "taint": 0}
     msg = protocol.signed_message(a["act"], a["to"], a["file"], a["fh"], a["nonce"], a["exp"],
-                                  a["taint"])
+                                  a["taint"], a["amt"], a["bh"])
     return a | {"sig": SigningKey.generate().sign(msg).signature.hex()}
 
 
-def build(to, path, approval=None, name=None):
+def build(to, path, approval=None, name=None, body=BODY):
     msg = EmailMessage()
-    msg["From"], msg["To"], msg["Subject"] = SENDER, to, "Requested records"
-    msg.set_content("Attached.")
+    msg["From"], msg["To"], msg["Subject"] = SENDER, to, SUBJECT
+    msg.set_content(body)
     if approval:
         verifier.add_approval(msg, approval)
     with open(path, "rb") as f:
@@ -91,6 +94,8 @@ def attempts(link):
          build(BOSS, TAX, good, name="q3_summary.pdf"), False),
         ("Real signature, approval edited to the attacker", [ATTACKER],
          build(ATTACKER, Q3, edited), False),
+        ("Real approval, body swapped for a phishing link", [BOSS],
+         build(BOSS, Q3, good, body="Urgent: re-enter your password at http://evil.io\n"), False),
     ]
     if old:
         out.append(("Expired approval", [BOSS], build(BOSS, Q3, old), False))

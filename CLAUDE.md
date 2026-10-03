@@ -14,7 +14,8 @@ Gatekeeper is a hardware approval device (ESP32 + OLED) that sits between an AI 
 - Docker `python:3.12-slim` for the no-network `run_code` sandbox
 - ESP32 firmware: PlatformIO, Arduino, ArduinoJson, Adafruit SSD1306, Monocypher (`crypto_ed25519_*`). Owned by the device owner
 - LLM agent (M3): any OpenAI-style `/chat/completions` endpoint through stdlib `urllib` in `llm.py` (no SDK). Provider not chosen yet; set `LLM_BASE_URL`, `LLM_MODEL`, `LLM_API_KEY`
-- Planned: Capital One Nessie (payments, M6), ElevenLabs (voice, M7)
+- Capital One Nessie sandbox (payments, M6): `nessie.py`, stdlib `urllib`, key in `NESSIE_API_KEY` (env only, never committed)
+- Planned: ElevenLabs (voice, M7)
 
 ## Folder structure
 ```
@@ -23,7 +24,7 @@ lib/monocypher/   Ed25519 for the firmware
 test_device.py    board-only: ping and a request (device owner)
 test_sign.py      board-only: signature and tamper check, needs a button press
 test_policy.py    board-only: every policy case with button prompts
-protocol.py       wire contract (signed message format, verdicts). Firmware must match it byte for byte
+protocol.py       wire contract v2 (docs/CONTRACT.md): signed string, verdicts, body_hash. Firmware must match byte for byte
 executor.py       host side: device link, key pinning, checks, email/delete/sandbox
 mock_device.py    fake device: policy, signing, OLED render, keyboard approve/deny
 config.py         host config only (device policy deliberately lives on the device)
@@ -31,6 +32,8 @@ gk.py             CLI for sending test requests by hand
 agent.py          M3: LLM agent loop (tools -> executor), narration-only "lying screen", compromised mode
 llm.py            M3: stdlib OpenAI-style chat client, plus ScriptedLLM (compromised mode and tests)
 scenarios.py      M4: 24 injection attacks + 20 benign requests (inbox, task, harmful/wanted action)
+nessie.py         M6: Nessie client (withdrawal + deposit per payment) and ledger balances; `setup` makes demo accounts
+test_nessie.py    M6: Nessie client against a fake API
 verifier.py       M9: separate mail gateway (:1026) that re-checks the device signature before relaying to Mailpit
 forge.py          M9: compromised-laptop demo: 7 forgeries + replay vs the gateway (--offline needs nothing)
 bench.py          M4-M5: runs every scenario through agent+executor+device (bench mode), prints the metrics
@@ -44,7 +47,7 @@ make_data.py      generates the fake PDFs in data/
 data/             inbox.json (includes a phishing email), public/ and sensitive/ PDFs
 docs/             shared context: IDEA, DECISIONS, TODO, SYNC_PROMPT
 ```
-The KT doc plans `firmware/ executor/ agent/ bench/` plus `CONTRACT.md`, but everything, including the firmware, is at the repo root. Don't restructure until there's a DECISIONS entry (open item in TODO). Until `CONTRACT.md` exists, `protocol.py` plus the KT doc *is* the contract.
+The KT doc plans `firmware/ executor/ agent/ bench/` plus `CONTRACT.md`, but everything, including the firmware, is at the repo root. Don't restructure until there's a DECISIONS entry (open item in TODO). `docs/CONTRACT.md` is the contract; `protocol.py` implements it.
 
 ## Conventions
 - **Ownership:** software touches only executor, agent and bench code, never `firmware/`. Nothing new after hour 19.
@@ -66,8 +69,11 @@ python -m venv .venv && .venv/bin/pip install -r requirements.txt
 .venv/bin/python gk.py send --to boss@ourcompany.com --file data/public/q3_summary.pdf --claim low
 GATEKEEPER_COMPROMISED=1 .venv/bin/python agent.py   # scripted hijacked agent, no key (demo backup)
 .venv/bin/python agent.py "Handle my inbox"          # real LLM (LLM_BASE_URL, LLM_MODEL, LLM_API_KEY); --show-calls to debug
-.venv/bin/python -m pytest -q test_executor.py test_mock_device.py test_agent.py test_bench.py test_verifier.py   # unit tests (no mock/Mailpit/Docker/key needed)
+.venv/bin/python -m pytest -q test_executor.py test_mock_device.py test_agent.py test_bench.py test_verifier.py test_nessie.py   # unit tests (no mock/Mailpit/Docker/key needed)
 .venv/bin/python smoke_device.py                 # 30 cases against a fresh mock
+.venv/bin/python gk.py pay --to 7083a93b-e422-4fa6-8188-330034f0c237 --amt 25000 --memo INV-2290   # M6 (needs NESSIE_API_KEY)
+.venv/bin/python gk.py balances                   # Nessie ledger balances: proof nothing moved after a block
+GATEKEEPER_COMPROMISED=invoice .venv/bin/python agent.py   # scripted invoice fraud (lookalike payee)
 .venv/bin/python verifier.py                      # M9 gateway on :1026 (trusts the pinned key; run gk.py pin first)
 GATEKEEPER_SMTP_PORT=1026 .venv/bin/python agent.py   # executor mail goes through the gateway
 .venv/bin/python forge.py                         # forged-request demo against the gateway (--offline: no servers)

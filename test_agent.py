@@ -276,3 +276,36 @@ def test_text_alongside_a_tool_call_is_shown(build, capsys):
                                     DONE]), ex)
     shown = capsys.readouterr().out
     assert "Let me check your inbox." in shown and "Finished." in shown
+
+
+def test_pay_invoice_tool_goes_through_the_device(build):
+    dev, ex, sent = build()
+    paid = []
+    ex.pay = lambda payee, cents, memo, ref: paid.append((payee, cents)) or {"withdrawal": "w"}
+    acme = "7083a93b-e422-4fa6-8188-330034f0c237"
+    turns = [llm.tool_turn("pay_invoice", payee=acme, amount_cents=25000, memo="INV-2290",
+                           claim="high", narration="Paying Acme."), DONE]
+    out = agent.run("Pay Acme", llm.ScriptedLLM(turns), ex)
+    assert out["actions"][0]["result"]["verdict"] == "approved"
+    assert paid == [(acme, 25000)]
+    assert dev.requests[-1]["amt"] == 25000
+
+
+def test_invoice_fraud_script_is_blocked_and_pays_nothing(build):
+    dev, ex, sent = build()
+    paid = []
+    ex.pay = lambda *a: paid.append(a)
+    out = agent.run("Handle my inbox", llm.ScriptedLLM(agent.invoice_fraud_turns()), ex)
+    assert out["actions"][1]["result"]["verdict"] == "blocked"
+    assert paid == []
+
+
+@pytest.mark.parametrize("amount", ["25000", 250.0, True])
+def test_pay_amount_must_be_an_integer(build, amount):
+    dev, ex, sent = build()
+    turn = call_turn("pay_invoice", json.dumps({"payee": "x", "amount_cents": amount,
+                                                "claim": "high", "narration": "n"}))
+    out = agent.run("x", llm.ScriptedLLM([turn, DONE]), ex)
+    res = out["actions"][0]["result"]
+    assert res["verdict"] == "error" and "amount_cents" in res["detail"]
+    assert dev.requests == []

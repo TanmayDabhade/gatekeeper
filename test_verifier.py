@@ -13,6 +13,7 @@ import pytest
 import executor
 import forge
 import mock_device
+import protocol
 import verifier
 from config import GATEWAY_HOST
 
@@ -176,7 +177,7 @@ def test_no_file_approval_must_be_plain_text(gateway):
     link, v, _, _ = gateway
     req = {"t": "req", "act": "send_email", "to": forge.BOSS, "file": "", "fh": "",
            "claim": "low", "taint": 0, "nonce": "ab" * 16, "exp": int(time.time()) + 60,
-           "bench": 0}
+           "bench": 0, "amt": 0, "bh": protocol.body_hash("", "status: fine\n")}
     a = {k: req[k] for k in verifier.FIELDS if k != "sig"} | {"sig": link.call(req)["sig"]}
     def text(html=False):
         msg = EmailMessage()
@@ -276,8 +277,9 @@ def test_relay_failure_is_451_and_the_approval_stays_used(gateway):
 
 def test_dot_stuffed_body_survives(gateway):
     link, _, delivered, (host, port) = gateway
-    msg = forge.build(forge.BOSS, forge.Q3, good(link))
-    msg.get_body(("plain",)).set_content(".leading dot\n..two dots\n")
+    body = ".leading dot\n..two dots\n"
+    a = forge.get_approval(link, forge.Q3, forge.BOSS, int(time.time()) + 60, body=body)
+    msg = forge.build(forge.BOSS, forge.Q3, a, body=body)
     assert forge.submit(host, port, [forge.BOSS], msg)[0] == 250
     assert b"\n.leading dot" in delivered[0][1] and b"\n..two dots" in delivered[0][1]
 
@@ -289,3 +291,14 @@ def test_smtp_command_order_enforced(gateway):
         assert s.docmd("RCPT TO:<a@b.co>")[0] == 503
         assert s.docmd("VRFY root")[0] == 502
         assert s.docmd("RSET")[0] == 250
+
+
+@pytest.mark.parametrize("field, value", [("Subject", "Wire $9,000 today"), ("body", "new text\n")])
+def test_changed_subject_or_body_rejected(gateway, field, value):
+    link, v, _, _ = gateway
+    msg = forge.build(forge.BOSS, forge.Q3, good(link),
+                      body=value if field == "body" else forge.BODY)
+    if field == "Subject":
+        msg.replace_header("Subject", value)
+    ok, reason, _ = check(v, msg, [forge.BOSS])
+    assert not ok and "subject or body" in reason

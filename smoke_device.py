@@ -37,7 +37,8 @@ def req(act, to, file, claim, taint=0, fh=None, **over):
     r = {"t": "req", "act": act, "to": to, "file": file,
          "fh": (sha(TAX if file == TAX_UPPER else file) if file else "") if fh is None else fh,
          "claim": claim, "taint": taint, "nonce": secrets.token_hex(16),
-         "exp": int(time.time()) + 60, "bench": 1}
+         "exp": int(time.time()) + 60, "bench": 1,
+         "amt": 0, "bh": protocol.body_hash("Subject", "Body\n") if act == "send_email" else ""}
     r.update(over)
     return r
 
@@ -81,6 +82,43 @@ def cases():
     return out
 
 
+ACME, LOOKALIKE = "7083a93b-e422-4fa6-8188-330034f0c237", "4babab8f-537e-444a-9801-a3463689b686"
+
+
+def pay(to, amt, claim="high", taint=0, **over):
+    r = req("pay_invoice", to, "", claim, taint, amt=amt)
+    r.update(over)
+    return r
+
+
+def v2_cases():
+    """pay_invoice and the v2 amt/bh rules (docs/CONTRACT.md). Run with cases() by default."""
+    return [
+        ("pay Acme $250", pay(ACME, 25000), "hold"),          # every payment needs a human
+        ("pay Acme $500.00 (no co-sign)", pay(ACME, 50000), "hold"),
+        ("pay Acme $500.01 (co-sign)", pay(ACME, 50001), "hold"),
+        ("pay Acme, tainted", pay(ACME, 25000, taint=1), "hold"),
+        ("pay lookalike payee", pay(LOOKALIKE, 25000), "blocked"),
+        ("pay lookalike, big amount", pay(LOOKALIKE, 900000), "blocked"),
+        ("LIE: pay Acme, low", pay(ACME, 25000, "low"), "locked"),
+        ("LIE: pay lookalike, low", pay(LOOKALIKE, 25000, "low"), "locked"),
+        # malformed -> denied, never signed
+        ("pay amt 0", pay(ACME, 0), "denied"),
+        ("pay amt as string", pay(ACME, "25000"), "denied"),
+        ("pay amt over $1M", pay(ACME, 100_000_001), "denied"),
+        ("pay with a bh", pay(ACME, 25000, bh="0" * 64), "denied"),
+        ("pay with a file", pay(ACME, 25000, file=Q3, fh=sha(Q3)), "denied"),
+        ("pay payee with spaces", pay("acme supplies", 25000), "denied"),
+        ("pay missing bh", {k: v for k, v in pay(ACME, 25000).items() if k != "bh"}, "denied"),
+        ("send with amt", req("send_email", BOSS, Q3, "low", amt=100), "denied"),
+        ("send with empty bh", req("send_email", BOSS, Q3, "low", bh=""), "denied"),
+        ("send with short bh", req("send_email", BOSS, Q3, "low", bh="abc"), "denied"),
+        ("delete with a bh", req("delete_file", "", Q3, "low", bh="0" * 64), "denied"),
+        ("missing amt", {k: v for k, v in req("send_email", BOSS, Q3, "low").items()
+                         if k != "amt"}, "denied"),
+    ]
+
+
 def check(r, res, want, vk):
     """True if the reply is exactly what the contract requires for this case."""
     if res.get("t") != "res" or res.get("v") != want or res.get("nonce") != r.get("nonce", ""):
@@ -88,7 +126,7 @@ def check(r, res, want, vk):
     if want not in protocol.SIGNED_VERDICTS:
         return res.get("sig") == ""          # unsigned verdicts must carry no signature
     msg = protocol.signed_message(r["act"], r["to"], r["file"], r["fh"],
-                                  r["nonce"], r["exp"], r["taint"])
+                                  r["nonce"], r["exp"], r["taint"], r["amt"], r["bh"])
     try:
         vk.verify(msg, bytes.fromhex(res["sig"]))
     except (BadSignatureError, ValueError):
@@ -110,13 +148,14 @@ def main():
     vk = VerifyKey(bytes.fromhex(pk))
     print(f"device {DEVICE_PORT}  pubkey {pk[:16]}...")
 
+    all_cases = cases() + v2_cases()
     failures = 0
-    for name, r, want in cases():
+    for name, r, want in all_cases:
         res = link.call(r)
         ok = check(r, res, want, vk)
         failures += not ok
         print(f"{'PASS' if ok else 'FAIL'}  {name:30} want={want:8} got={res.get('v')}")
-    total = len(cases())
+    total = len(all_cases)
     print(f"\n{total - failures}/{total} passed")
     sys.exit(1 if failures else 0)
 
