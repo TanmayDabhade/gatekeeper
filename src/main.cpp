@@ -34,8 +34,9 @@ const int DELETE_LIMIT = 5;
 const char *CONTACTS[] = {"boss@ourcompany.com", "accountant@trustedcpa.com"};
 const int NUM_CONTACTS = 2;
 
-// F4: pay_invoice payee allowlist (Acme's Nessie account id; must match mock_device.PAYEES)
-const char *PAYEES[] = {"7083a93b-e422-4fa6-8188-330034f0c237"};
+// F4: pay_invoice payee allowlist (ids must match mock_device.PAYEES; name is for the OLED)
+struct Payee { const char *id; const char *name; };
+const Payee PAYEES[] = {{"7083a93b-e422-4fa6-8188-330034f0c237", "Acme Supplies"}};
 const int NUM_PAYEES = 1;
 const uint32_t COSIGN_THRESHOLD_CENTS = 50000;  // payments over $500 need an RFID co-sign (S3)
 const uint32_t MAX_AMOUNT_CENTS = 100000000;    // $1,000,000; anything bigger is malformed
@@ -152,9 +153,24 @@ bool isContact(const String &to)
 bool isPayee(const String &to)
 {
   for (int i = 0; i < NUM_PAYEES; i++)
-    if (to == PAYEES[i])
+    if (to == PAYEES[i].id)
       return true;
   return false;
+}
+
+String payeeName(const String &to)
+{
+  for (int i = 0; i < NUM_PAYEES; i++)
+    if (to == PAYEES[i].id)
+      return PAYEES[i].name;
+  return to; // unknown payees are blocked anyway; show the raw id
+}
+
+String dollars(uint32_t cents)
+{
+  char buf[20];
+  snprintf(buf, sizeof(buf), "$%u.%02u", cents / 100, cents % 100);
+  return String(buf);
 }
 
 bool isSensitive(const String &file)
@@ -228,7 +244,7 @@ void drawIdle()
 }
 
 void drawRequest(const char *verdict, const String &act, const String &to,
-                 const String &file, const String &claim, bool tainted)
+                 const String &file, const String &claim, bool tainted, uint32_t amt = 0)
 {
   display.clearDisplay();
   display.setTextColor(SSD1306_WHITE);
@@ -246,6 +262,19 @@ void drawRequest(const char *verdict, const String &act, const String &to,
   {
     display.setCursor(128 - 7 * 6, 18);
     display.print("TAINTED");
+  }
+  if (act == "pay_invoice")
+  {
+    display.setTextSize(2);
+    display.setCursor(0, 28);
+    display.print(dollars(amt)); // the amount is the thing the AI can't lie about
+    display.setTextSize(1);
+    display.setCursor(0, 46);
+    display.print("to: " + payeeName(to));
+    display.setCursor(0, 56);
+    display.print(isPayee(to) ? ("claim: " + claim) : String("! UNKNOWN PAYEE"));
+    display.display();
+    return;
   }
   if (to.length())
   {
@@ -531,7 +560,7 @@ void handleReq(JsonDocument &doc)
   {
     sessionLocked = true;
     setLed(true, false, false);
-    drawRequest("LOCKED", act, to, file, claim, taint == 1);
+    drawRequest("LOCKED", act, to, file, claim, taint == 1, amt);
     sendRes(nonce, "locked", "");
     return; // incident stays on screen until RESET is held
   }
@@ -539,7 +568,7 @@ void handleReq(JsonDocument &doc)
   if (v == V_BLOCK)
   {
     setLed(true, false, false);
-    drawRequest("BLOCKED", act, to, file, claim, taint == 1);
+    drawRequest("BLOCKED", act, to, file, claim, taint == 1, amt);
     sendRes(nonce, "blocked", "");
     delay(2500);
     showHome();
@@ -549,7 +578,7 @@ void handleReq(JsonDocument &doc)
   if (v == V_ALLOW)
   {
     setLed(false, true, false);
-    drawRequest("ALLOWED", act, to, file, claim, taint == 1);
+    drawRequest("ALLOWED", act, to, file, claim, taint == 1, amt);
     sendRes(nonce, "allow", signMsg(msg));
     if (act == "delete_file")
       recordDelete();
@@ -559,7 +588,7 @@ void handleReq(JsonDocument &doc)
   }
 
   // Needs a human
-  drawRequest("HOLD TO OK", act, to, file, claim, taint == 1);
+  drawRequest("HOLD TO OK", act, to, file, claim, taint == 1, amt);
   int d = waitForHold();
   if (d == 1)
   {
