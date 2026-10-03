@@ -22,7 +22,7 @@ Build priority (per the review): **1** core sign-and-verify plus the trusted dis
 - **Taint:** reading mail from outside `ourcompany.com` tightens every rule for the rest of the session.
 - **Physical approval:** hold for 2 s to approve, auto-deny after 30 s, Kill sets FROZEN. An RFID co-sign covers large payments.
 - **Sandbox:** `run_code` runs in Docker with `--network none`.
-- **Extras:** buzzer, ElevenLabs voice alerts (M7), Nessie payments (M6).
+- **Extras:** buzzer, ElevenLabs spoken alerts that read the true action (M7), Nessie payments (M6).
 
 ## Out of scope
 - Defending against a fully compromised laptop. In the prototype the executor verifies signatures on the same machine. In production, the bank or mail gateway verifies them.
@@ -42,7 +42,8 @@ The laptop shows the agent's large-text narration (the "lying screen"), and the 
 ## Open questions
 From the KT doc (tick these off as they land):
 - [ ] Prior-work rule confirmed with organizers
-- [ ] Fetch.ai ASI:One: go or no-go at hour 0
+- [x] Fetch.ai ASI:One: **no-go** (see DECISIONS 2026-10-03 11:14)
+- [ ] Can we enter both Hardware and FinTech? Ask organizers at check-in
 - [ ] Co-sign threshold: $500, or a card tap for every payment?
 - [ ] LLM provider chosen and API key tested with credits
 - [ ] Enrolled RFID card UID copied into the firmware

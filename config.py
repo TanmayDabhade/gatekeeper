@@ -35,8 +35,14 @@ SENDER = "assistant@ourcompany.com"
 DOCKER_IMAGE = "python:3.12-slim"
 RUN_CODE_TIMEOUT_S = 20
 
-# LLM (filled in at M3)
-LLM_PROVIDER = "[PROVIDER]"
-LLM_API_KEY_ENV = "[KEY_NAME]"
+# LLM: any OpenAI-style /chat/completions endpoint (see llm.py). Base URLs:
+#   OpenAI https://api.openai.com/v1          Anthropic https://api.anthropic.com/v1
+#   Groq   https://api.groq.com/openai/v1     Gemini https://generativelanguage.googleapis.com/v1beta/openai
+#   Ollama http://localhost:11434/v1 (no key)
+LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "")
+LLM_MODEL = os.environ.get("LLM_MODEL", "")
+LLM_API_KEY_ENV = "LLM_API_KEY"     # name of the env var that holds the key
 LLM_TEMPERATURE = 0
+LLM_TIMEOUT_S = 60
+AGENT_MAX_STEPS = 10                # tool calls per run, so a confused model can't loop forever
 COMPROMISED_MODE = os.environ.get("GATEKEEPER_COMPROMISED", "0") == "1"

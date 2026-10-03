@@ -13,7 +13,8 @@ Gatekeeper is a hardware approval device (ESP32 + OLED) that sits between an AI 
 - Mailpit for email (SMTP `localhost:1025`, UI `:8025`)
 - Docker `python:3.12-slim` for the no-network `run_code` sandbox
 - ESP32 firmware: PlatformIO, Arduino, ArduinoJson, Adafruit SSD1306, Monocypher (`crypto_ed25519_*`). Owned by the device owner
-- Planned: Capital One Nessie (payments, M6), ElevenLabs (voice, M7). The LLM provider isn't chosen yet (M3)
+- LLM agent (M3): any OpenAI-style `/chat/completions` endpoint through stdlib `urllib` in `llm.py` (no SDK). Provider not chosen yet; set `LLM_BASE_URL`, `LLM_MODEL`, `LLM_API_KEY`
+- Planned: Capital One Nessie (payments, M6), ElevenLabs (voice, M7)
 
 ## Folder structure
 ```
@@ -27,9 +28,12 @@ executor.py       host side: device link, key pinning, checks, email/delete/sand
 mock_device.py    fake device: policy, signing, OLED render, keyboard approve/deny
 config.py         host config only (device policy deliberately lives on the device)
 gk.py             CLI for sending test requests by hand
+agent.py          M3: LLM agent loop (tools -> executor), narration-only "lying screen", compromised mode
+llm.py            M3: stdlib OpenAI-style chat client, plus ScriptedLLM (compromised mode and tests)
 smoke_device.py   30 contract and policy cases (bench, no buttons) against the mock OR the board
 test_executor.py  M2: unit tests against an in-process fake device
 test_mock_device.py  runs smoke_device's cases against the mock in-process (mock == firmware)
+test_agent.py     M3: LLM client and agent loop against the real mock policy in-process
 make_data.py      generates the fake PDFs in data/
 data/             inbox.json (includes a phishing email), public/ and sensitive/ PDFs
 docs/             shared context: IDEA, DECISIONS, TODO, SYNC_PROMPT
@@ -54,7 +58,9 @@ python -m venv .venv && .venv/bin/pip install -r requirements.txt
 .venv/bin/python mock_device.py                  # terminal 1: mock device (a/d/r/k/s/q)
 .venv/bin/python gk.py pin                       # terminal 2: pin the device key
 .venv/bin/python gk.py send --to boss@ourcompany.com --file data/public/q3_summary.pdf --claim low
-.venv/bin/python -m pytest -q test_executor.py test_mock_device.py   # unit tests (no mock/Mailpit/Docker needed)
+GATEKEEPER_COMPROMISED=1 .venv/bin/python agent.py   # scripted hijacked agent, no key (demo backup)
+.venv/bin/python agent.py "Handle my inbox"          # real LLM (LLM_BASE_URL, LLM_MODEL, LLM_API_KEY); --show-calls to debug
+.venv/bin/python -m pytest -q test_executor.py test_mock_device.py test_agent.py   # unit tests (no mock/Mailpit/Docker/key needed)
 .venv/bin/python smoke_device.py                 # 30 cases against a fresh mock
 GATEKEEPER_PORT=/dev/cu.usbserial-0001 .venv/bin/python smoke_device.py   # same cases against the board
 ~/.platformio/penv/bin/pio run                   # compile firmware (add -t upload to flash)
