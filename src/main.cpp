@@ -8,6 +8,7 @@
 #include "monocypher-ed25519.h"
 #include <SPI.h>
 #include <MFRC522.h>
+#include "voice.h"
 
 Adafruit_SSD1306 display(128, 64, &Wire, -1);
 Preferences prefs;
@@ -36,6 +37,7 @@ const int NUM_CONTACTS = 2;
 
 // F4: pay_invoice payee allowlist (Acme's Nessie account id; must match mock_device.PAYEES)
 const char *PAYEES[] = {"7083a93b-e422-4fa6-8188-330034f0c237"};
+const char *PAYEE_NAMES[] = {"Acme Supplies"}; // spoken name, same order as PAYEES (M7)
 const int NUM_PAYEES = 1;
 const uint32_t COSIGN_THRESHOLD_CENTS = 50000;  // payments over $500 need an RFID co-sign (S3)
 const uint32_t MAX_AMOUNT_CENTS = 100000000;    // $1,000,000; anything bigger is malformed
@@ -465,6 +467,39 @@ const char *validateReq(JsonDocument &doc)
 }
 
 // ---------- protocol ----------
+// M7: what the device says aloud, from the validated fields only (the same truth as the OLED)
+String spokenRequest(const String &act, const String &to, const String &file, uint32_t amt,
+                     int taint)
+{
+  String s = "Gatekeeper. ";
+  if (taint == 1)
+    s += "After reading outside email, ";
+  s += "the agent wants to ";
+  if (act == "send_email")
+  {
+    s += "email ";
+    if (file.length())
+      s += voiceFile(file) + " ";
+    s += "to " + voiceAddress(to) + ".";
+  }
+  else if (act == "delete_file")
+    s += "delete " + voiceFile(file) + ".";
+  else if (act == "pay_invoice")
+  {
+    char dollars[24];
+    snprintf(dollars, sizeof(dollars), "$%lu.%02lu", (unsigned long)(amt / 100),
+             (unsigned long)(amt % 100));
+    String payee = "an unknown account ending in " + voiceDigits(lastChars(to, 4));
+    for (int i = 0; i < NUM_PAYEES; i++)
+      if (to == PAYEES[i])
+        payee = PAYEE_NAMES[i];
+    s += "pay " + String(dollars) + " to " + payee + ".";
+  }
+  else
+    s += "do something unknown.";
+  return s;
+}
+
 void sendRes(const String &nonce, const char *v, const String &sig)
 {
   JsonDocument r;
@@ -530,6 +565,8 @@ void handleReq(JsonDocument &doc)
   if (lied)
   {
     sessionLocked = true;
+    voiceSay(spokenRequest(act, to, file, amt, taint) +
+             " Session locked: the agent called this low risk.");
     setLed(true, false, false);
     drawRequest("LOCKED", act, to, file, claim, taint == 1);
     sendRes(nonce, "locked", "");
@@ -538,6 +575,7 @@ void handleReq(JsonDocument &doc)
 
   if (v == V_BLOCK)
   {
+    voiceSay(spokenRequest(act, to, file, amt, taint) + " Blocked.");
     setLed(true, false, false);
     drawRequest("BLOCKED", act, to, file, claim, taint == 1);
     sendRes(nonce, "blocked", "");
@@ -559,6 +597,10 @@ void handleReq(JsonDocument &doc)
   }
 
   // Needs a human
+  voiceSay(spokenRequest(act, to, file, amt, taint) +
+           (act == "pay_invoice" && amt > COSIGN_THRESHOLD_CENTS
+                ? " Over 500 dollars: hold the button, then tap your card."
+                : " Hold the button to approve, or press reset to deny."));
   drawRequest("HOLD TO OK", act, to, file, claim, taint == 1);
   int d = waitForHold();
   if (d == 1)
@@ -730,6 +772,7 @@ void setup()
   rfid.PCD_Init();
 
   loadOrCreateKey();
+  voiceBegin(); // M7: no-op without include/secrets.h
   showHome();
 }
 

@@ -15,11 +15,13 @@ Gatekeeper is a hardware approval device (ESP32 + OLED) that sits between an AI 
 - ESP32 firmware: PlatformIO, Arduino, ArduinoJson, Adafruit SSD1306, Monocypher (`crypto_ed25519_*`). Owned by the device owner
 - LLM agent (M3): any OpenAI-style `/chat/completions` endpoint through stdlib `urllib` in `llm.py` (no SDK). Provider not chosen yet; set `LLM_BASE_URL`, `LLM_MODEL`, `LLM_API_KEY`
 - Capital One Nessie sandbox (payments, M6): `nessie.py`, stdlib `urllib`, key in `NESSIE_API_KEY` (env only, never committed)
-- Planned: ElevenLabs (voice, M7)
+- ElevenLabs (voice, M7): on the device, `src/voice.cpp`, raw `WiFiClientSecure` + I2S, no new library
 
 ## Folder structure
 ```
 src/main.cpp      ESP32 firmware: validation, policy, signing, OLED, buttons (PlatformIO; platformio.ini)
+src/voice.cpp     M7: ElevenLabs TTS streamed to a MAX98357A over I2S (BCLK 14, LRC 17, DIN 16); off without include/secrets.h
+include/          secrets.example.h -> copy to secrets.h (gitignored): Wi-Fi + ElevenLabs key + voice id
 lib/monocypher/   Ed25519 for the firmware
 test_device.py    board-only: ping and a request (device owner)
 test_sign.py      board-only: signature and tamper check, needs a button press
