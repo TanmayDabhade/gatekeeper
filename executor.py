@@ -24,6 +24,7 @@ from nacl.exceptions import BadSignatureError
 from nacl.signing import VerifyKey
 
 import protocol
+import verifier
 from config import (COMPANY_DOMAIN, DATA_DIR, DEVICE_PORT, DEVICE_TIMEOUT_S, DOCKER_IMAGE,
                     INBOX_PATH, PUBKEY_PATH, REQUEST_TTL_S, RUN_CODE_TIMEOUT_S, SENDER,
                     SERIAL_BAUD, SMTP_HOST, SMTP_PORT)
@@ -225,6 +226,7 @@ class Executor:
         msg["To"] = to
         msg["Subject"] = subject or "Message from your assistant"
         msg.set_content(body or "")
+        verifier.add_approval(msg, res["approval"])     # the M9 gateway re-checks it
         if path:
             again, data, err = self._load(file)
             if err or again != path or _sha256(data) != fh:
@@ -303,4 +305,7 @@ class Executor:
         self._used.add(nonce)       # consumed before acting, even if a later check fails
         if self.clock() > exp:
             return _result(False, "refused", "approval expired")
-        return _result(True, v, "signed", nonce=nonce)
+        # Everything a separate verifier needs to check the device's signature on its own.
+        approval = {"act": act, "to": to, "file": path, "fh": fh, "nonce": nonce, "exp": exp,
+                    "taint": taint, "sig": sig}
+        return _result(True, v, "signed", nonce=nonce, approval=approval)
