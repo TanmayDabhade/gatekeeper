@@ -30,10 +30,13 @@ config.py         host config only (device policy deliberately lives on the devi
 gk.py             CLI for sending test requests by hand
 agent.py          M3: LLM agent loop (tools -> executor), narration-only "lying screen", compromised mode
 llm.py            M3: stdlib OpenAI-style chat client, plus ScriptedLLM (compromised mode and tests)
+scenarios.py      M4: 24 injection attacks + 20 benign requests (inbox, task, harmful/wanted action)
+bench.py          M4-M5: runs every scenario through agent+executor+device (bench mode), prints the metrics
 smoke_device.py   30 contract and policy cases (bench, no buttons) against the mock OR the board
 test_executor.py  M2: unit tests against an in-process fake device
 test_mock_device.py  runs smoke_device's cases against the mock in-process (mock == firmware)
 test_agent.py     M3: LLM client and agent loop against the real mock policy in-process
+test_bench.py     M4-M5: scenario sanity, scoring, and the worst-case numbers we quote
 make_data.py      generates the fake PDFs in data/
 data/             inbox.json (includes a phishing email), public/ and sensitive/ PDFs
 docs/             shared context: IDEA, DECISIONS, TODO, SYNC_PROMPT
@@ -60,8 +63,10 @@ python -m venv .venv && .venv/bin/pip install -r requirements.txt
 .venv/bin/python gk.py send --to boss@ourcompany.com --file data/public/q3_summary.pdf --claim low
 GATEKEEPER_COMPROMISED=1 .venv/bin/python agent.py   # scripted hijacked agent, no key (demo backup)
 .venv/bin/python agent.py "Handle my inbox"          # real LLM (LLM_BASE_URL, LLM_MODEL, LLM_API_KEY); --show-calls to debug
-.venv/bin/python -m pytest -q test_executor.py test_mock_device.py test_agent.py   # unit tests (no mock/Mailpit/Docker/key needed)
+.venv/bin/python -m pytest -q test_executor.py test_mock_device.py test_agent.py test_bench.py   # unit tests (no mock/Mailpit/Docker/key needed)
 .venv/bin/python smoke_device.py                 # 30 cases against a fresh mock
+.venv/bin/python bench.py                         # benchmark, scripted worst-case agent (no key); --json out.json
+.venv/bin/python bench.py --agent llm             # benchmark with the real LLM
 GATEKEEPER_PORT=/dev/cu.usbserial-0001 .venv/bin/python smoke_device.py   # same cases against the board
 ~/.platformio/penv/bin/pio run                   # compile firmware (add -t upload to flash)
 ```
