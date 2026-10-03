@@ -137,6 +137,89 @@ def test_second_attachment_rejected(gateway):
     assert not ok and "one attachment" in reason
 
 
+# Parts a mail client would show but a "count the attachments" check would miss.
+def _html_alternative(msg):
+    import base64
+    with open(forge.TAX, "rb") as f:
+        b64 = base64.b64encode(f.read()).decode()
+    msg.get_body(("plain",)).add_alternative(f"<pre>{b64}</pre>", subtype="html")
+
+
+def _nested_related(msg):
+    from email.mime.application import MIMEApplication
+    from email.mime.multipart import MIMEMultipart
+    from email.mime.text import MIMEText
+    rel = MIMEMultipart("related")
+    rel.attach(MIMEText("<p>hi</p>", "html"))
+    with open(forge.TAX, "rb") as f:
+        rel.attach(MIMEApplication(f.read(), "pdf"))
+    msg.attach(rel)
+
+
+def _inline_extra(msg):
+    with open(forge.TAX, "rb") as f:
+        msg.add_attachment(f.read(), maintype="application", subtype="pdf",
+                           filename="tax_return.pdf", disposition="inline")
+
+
+@pytest.mark.parametrize("smuggle", [_html_alternative, _nested_related, _inline_extra])
+def test_hidden_parts_are_rejected(gateway, smuggle):
+    link, v, _, _ = gateway
+    msg = forge.build(forge.BOSS, forge.Q3, good(link))
+    smuggle(msg)
+    ok, reason, _ = check(v, msg, [forge.BOSS])
+    assert not ok, reason
+
+
+def test_no_file_approval_must_be_plain_text(gateway):
+    from email.message import EmailMessage
+    link, v, _, _ = gateway
+    req = {"t": "req", "act": "send_email", "to": forge.BOSS, "file": "", "fh": "",
+           "claim": "low", "taint": 0, "nonce": "ab" * 16, "exp": int(time.time()) + 60,
+           "bench": 0}
+    a = {k: req[k] for k in verifier.FIELDS if k != "sig"} | {"sig": link.call(req)["sig"]}
+    def text(html=False):
+        msg = EmailMessage()
+        msg["To"] = forge.BOSS
+        verifier.add_approval(msg, a)
+        msg.set_content("status: fine")
+        if html:
+            msg.add_alternative("<p>status: fine</p>", subtype="html")
+        return msg
+    ok, reason, _ = check(v, text(html=True), [forge.BOSS])
+    assert not ok and "plain text" in reason
+    assert check(v, text(), [forge.BOSS])[0]       # the rejection didn't use up the approval
+
+
+def test_replay_after_gateway_restart_rejected(gateway, tmp_path):
+    link, _, _, _ = gateway
+    path = str(tmp_path / "nonces")
+    msg = forge.build(forge.BOSS, forge.Q3, good(link))
+    assert verifier.Verifier(link.dev.sk.verify_key, nonce_path=path).check(
+        msg.as_bytes(), [forge.BOSS])[0]
+    restarted = verifier.Verifier(link.dev.sk.verify_key, nonce_path=path)
+    ok, reason, _ = restarted.check(msg.as_bytes(), [forge.BOSS])
+    assert not ok and "replayed" in reason
+
+
+def test_expired_nonces_are_pruned_on_start(gateway, tmp_path):
+    link, _, _, _ = gateway
+    path = tmp_path / "nonces"
+    live = int(time.time()) + 60
+    path.write_text(f"{'aa' * 16} {int(time.time()) - 10}\n{'bb' * 16} {live}\n")
+    v = verifier.Verifier(link.dev.sk.verify_key, nonce_path=str(path))
+    assert path.read_text() == f"{'bb' * 16} {live}\n"
+    assert "bb" * 16 in v.used and "aa" * 16 not in v.used
+
+
+def test_unwritable_nonce_store_fails_closed(gateway, tmp_path):
+    link, _, _, _ = gateway
+    v = verifier.Verifier(link.dev.sk.verify_key, nonce_path=str(tmp_path / "nonces"))
+    v.used.path = str(tmp_path / "missing-dir" / "nonces")
+    ok, reason, _ = check(v, forge.build(forge.BOSS, forge.Q3, good(link)), [forge.BOSS])
+    assert not ok and "can't record the nonce" in reason
+
+
 def test_renamed_attachment_rejected(gateway):
     link, v, _, _ = gateway
     msg = forge.build(forge.BOSS, forge.Q3, good(link), name="invoice.pdf")
@@ -174,7 +257,7 @@ def test_gateway_trusts_only_its_pinned_key(gateway):
 
 # ---------------------------------------------------------------- SMTP plumbing
 
-def test_relay_failure_is_451_and_the_approval_can_be_retried(gateway):
+def test_relay_failure_is_451_and_the_approval_stays_used(gateway):
     link, v, _, _ = gateway
     def down(*a):
         raise OSError("connection refused")
@@ -183,7 +266,9 @@ def test_relay_failure_is_451_and_the_approval_can_be_retried(gateway):
     try:
         msg = forge.build(forge.BOSS, forge.Q3, good(link))
         assert forge.submit(*gw.server_address, [forge.BOSS], msg)[0] == 451
-        assert check(v, msg, [forge.BOSS])[0]          # nonce was released
+        # Never given back: the upstream might have taken the message before failing.
+        ok, reason, _ = check(v, msg, [forge.BOSS])
+        assert not ok and "replayed" in reason
     finally:
         gw.shutdown()
         gw.server_close()
