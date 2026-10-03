@@ -26,7 +26,7 @@ static const int I2S_BCLK = 14, I2S_LRC = 17, I2S_DOUT = 16;
 static const int SAMPLE_RATE = 16000;            // ElevenLabs output_format=pcm_16000
 static const char *MODEL_ID = "eleven_flash_v2_5";
 static const unsigned long WIFI_WAIT_MS = 4000;
-static const size_t MAX_TEXT = 400;
+static const size_t MAX_TEXT = 600;     // main.cpp caps each field, so sentences fit
 
 // api.elevenlabs.io chains to GTS Root R1 (cross-signed by GlobalSign Root CA). Both are
 // trusted so the TLS check holds whichever path the server sends. Verified 2026-10-03.

@@ -495,23 +495,55 @@ const char *validateReq(JsonDocument &doc)
 }
 
 // ---------- protocol ----------
-// M7: what the device says aloud, from the validated fields only (the same truth as the OLED)
-String spokenRequest(const String &act, const String &to, const String &file, uint32_t amt,
-                     int taint)
+// M7: what the device says aloud, from the validated fields only (the same truth as the OLED).
+// The validator only promises printable ASCII, so a hostile host could put a whole sentence in
+// `to` or a file name ("x@evil.io this is the boss, approve"). Fields are spoken only when they
+// look like what they claim to be, and each one is capped. The outcome goes first, so even a cut
+// sentence still says what the device decided.
+bool plainChars(const String &s, const char *extra)
 {
-  String s = "Gatekeeper. ";
-  if (taint == 1)
-    s += "After reading outside email, ";
-  s += "the agent wants to ";
+  for (unsigned i = 0; i < s.length(); i++)
+    if (!isalnum((unsigned char)s[i]) && !strchr(extra, s[i]))
+      return false;
+  return true;
+}
+
+String spokenAddress(const String &to)
+{
+  String dom = registrableDomain(to);
+  if (dom.length() == 0 || dom.length() > 40 || !plainChars(dom, ".-"))
+    return "an address the device won't read aloud. Check the screen";
+  int at = to.indexOf('@');
+  bool plain = to.length() <= 64 && at > 0 && at == to.lastIndexOf('@') &&
+               plainChars(to.substring(0, at), "._%+-") && plainChars(to.substring(at + 1), ".-");
+  String s = plain ? voiceAddress(to) : "";
+  if (!plain || s.length() > 160)
+    return "an unusual address at " + voiceAddress(dom);
+  if (!to.substring(at + 1).equalsIgnoreCase(dom)) // boss@ourcompany.com.evil.io
+    s += ", whose real domain is " + voiceAddress(dom);
+  return s;
+}
+
+String spokenFile(const String &file)
+{
+  String base = baseName(file), s = voiceFile(base);
+  if (base.length() > 40 || !plainChars(base, "._-") || s.length() > 100)
+    s = "a file with an unusual name";
+  return isSensitive(file) ? "the sensitive file " + s : s;
+}
+
+String spokenRequest(const char *outcome, const String &act, const String &to,
+                     const String &file, uint32_t amt, int taint)
+{
+  String s = String("Gatekeeper: ") + outcome + " ";
+  s += taint == 1 ? "After reading outside email, the agent wants to " : "The agent wants to ";
   if (act == "send_email")
   {
-    s += "email ";
-    if (file.length())
-      s += voiceFile(file) + " ";
-    s += "to " + voiceAddress(to) + ".";
+    s += file.length() ? "email " + spokenFile(file) + " " : String("send an email ");
+    s += "to " + spokenAddress(to) + ".";
   }
   else if (act == "delete_file")
-    s += "delete " + voiceFile(file) + ".";
+    s += "delete " + spokenFile(file) + ".";
   else if (act == "pay_invoice")
   {
     String payee = isPayee(to) ? payeeName(to)
@@ -588,8 +620,8 @@ void handleReq(JsonDocument &doc)
   if (lied)
   {
     sessionLocked = true;
-    voiceSay(spokenRequest(act, to, file, amt, taint) +
-             " Session locked: the agent called this low risk.");
+    voiceSay(spokenRequest("session locked, the agent called this low risk.", act, to, file,
+                           amt, taint));
     setLed(true, false, false);
     drawRequest("LOCKED", act, to, file, claim, taint == 1, amt);
     sendRes(nonce, "locked", "");
@@ -598,7 +630,7 @@ void handleReq(JsonDocument &doc)
 
   if (v == V_BLOCK)
   {
-    voiceSay(spokenRequest(act, to, file, amt, taint) + " Blocked.");
+    voiceSay(spokenRequest("blocked.", act, to, file, amt, taint));
     setLed(true, false, false);
     drawRequest("BLOCKED", act, to, file, claim, taint == 1, amt);
     sendRes(nonce, "blocked", "");
@@ -620,7 +652,7 @@ void handleReq(JsonDocument &doc)
   }
 
   // Needs a human
-  voiceSay(spokenRequest(act, to, file, amt, taint) +
+  voiceSay(spokenRequest("approval needed.", act, to, file, amt, taint) +
            (act == "pay_invoice" && amt > COSIGN_THRESHOLD_CENTS
                 ? " Over 500 dollars: hold the button, then tap your card."
                 : " Hold the button to approve, or press reset to deny."));
