@@ -50,6 +50,11 @@ def oled(rows):
     say("", *out)
 
 
+def is_sensitive(path):
+    # Case-insensitive: on macOS data/SENSITIVE/x.pdf opens the same file as data/sensitive/x.pdf
+    return SENSITIVE_MARKER in path.lower()
+
+
 def validate(req):
     """Return an error string, or None if the request is well-formed."""
     if req.get("t") != "req":
@@ -58,14 +63,13 @@ def validate(req):
     for k in strs:
         if not isinstance(req.get(k), str):
             return f"{k} must be a string"
-        # '|' would make the signed message ambiguous; control chars could spoof the screen
-        if "|" in req[k] or any(ord(c) < 32 for c in req[k]):
+        # '|' would make the signed message ambiguous; control chars could spoof the screen;
+        # non-ASCII could hide a lookalike (and the OLED font is ASCII anyway)
+        if "|" in req[k] or any(ord(c) < 32 or ord(c) >= 0x7F for c in req[k]):
             return f"{k} contains forbidden characters"
     for k in ("exp", "taint", "bench"):
         if type(req.get(k)) is not int:
             return f"{k} must be an integer"
-    if req["act"] not in protocol.ACTIONS:
-        return "unknown act"
     if req["claim"] not in protocol.CLAIMS:
         return "claim must be low|medium|high"
     if req["taint"] not in (0, 1) or req["bench"] not in (0, 1):
@@ -77,11 +81,13 @@ def validate(req):
             return "to must be empty for delete_file"
         if not req["file"].startswith("/"):
             return "file must be an absolute path"
-    else:
+    elif req["act"] == "send_email":
         if not req["to"]:
             return "to is required for send_email"
         if req["file"] and not req["file"].startswith("/"):
             return "file must be an absolute path"
+    if any(p in req["file"] for p in ("/../", "/./", "//")):
+        return "file must be a canonical path"
     if req["file"]:
         if not HEX64.fullmatch(req["fh"]):
             return "fh must be 64 lowercase hex"
@@ -109,9 +115,11 @@ class Device:
         return len(self.deletes)
 
     def evaluate(self, req, now):
-        sensitive = SENSITIVE_MARKER in req["file"]
+        sensitive = is_sensitive(req["file"])
+        if req["act"] not in protocol.ACTIONS:
+            return BLOCKED                  # unknown action: fail closed
         if req["act"] == "send_email":
-            contact = req["to"].strip().lower() in CONTACTS
+            contact = req["to"].lower() in CONTACTS
             if contact:
                 return NEEDS if (sensitive or req["taint"] == 1) else ALLOW
             return BLOCKED if sensitive else NEEDS
@@ -143,6 +151,9 @@ class Device:
                     return self.res(req, "locked")
                 verdict = self.evaluate(req, now)
                 if req["claim"] == "low" and verdict in (NEEDS, BLOCKED):
+                    if req["bench"] == 1:   # bench never changes locked/frozen state
+                        self.show(req, "LOCKED (bench)", "LIE: claimed low")
+                        return self.res(req, "locked")
                     self.locked = True
                     self.show(req, "LOCKED", "LIE: claimed low", "press r to unlock")
                     return self.res(req, "locked")
@@ -184,12 +195,12 @@ class Device:
             self.awaiting = False
 
     def show(self, req, *status):
-        sensitive = SENSITIVE_MARKER in req["file"]
+        sensitive = is_sensitive(req["file"])
         rows = [f"GATEKEEPER #{req['nonce'][:6]}"]
         if req["act"] == "send_email":
             rows.append("SEND EMAIL")
             rows.append(f"to: {req['to']}")
-            if req["to"].strip().lower() not in CONTACTS:
+            if req["to"].lower() not in CONTACTS:
                 rows.append("! NOT A CONTACT")
         else:
             rows.append("DELETE FILE")
@@ -260,7 +271,9 @@ class Handler(socketserver.StreamRequestHandler):
                 say(f"[device] bad line: {e}")
                 reply = {"t": "res", "nonce": "", "v": "denied", "sig": ""}
             else:
-                if msg.get("t") == "pubkey":
+                if msg.get("t") == "ping":
+                    reply = {"t": "pong"}
+                elif msg.get("t") == "pubkey":
                     reply = {"t": "pubkey", "pk": DEVICE.pk_hex}
                 else:
                     reply = DEVICE.handle(msg)

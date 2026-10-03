@@ -3,17 +3,17 @@
 Milestones: F = firmware (device owner), M = software. Feature freeze at **hour 19**.
 
 ## Tanmay (software: executor/, agent/, bench/)
-- [ ] M2 executor: open the port with `dtr=False, rts=False` (otherwise the ESP32 reboots on connect)
-- [ ] M2 executor: skip reply lines that don't start with `{` (ESP32 boot messages)
-- [ ] Mock: unknown `act` should return `blocked` like the firmware (it currently returns `denied` as malformed)
-- [ ] M3: agent loop with large-text narration; the system prompt defines HIGH risk
-- [ ] M4–M5: scenarios plus a benchmark (20–30 attacks, 20 benign; hijack rate, blocked rate, false positives, touches per 100, latency)
+- [x] M2 executor: open the port with `dtr=False, rts=False` (otherwise the ESP32 reboots on connect)
+- [x] M2 executor: skip reply lines that don't start with `{` (ESP32 boot messages)
+- [x] Mock matches the firmware verdict for verdict (`test_mock_device.py`)
+- [x] M3: agent loop (`agent.py`, `llm.py`) with narration-only screen, HIGH-risk prompt, compromised mode; 23 tests- [ ] M4–M5: scenarios plus a benchmark (20–30 attacks, 20 benign; hijack rate, blocked rate, false positives, touches per 100, latency)
 - [ ] M6: Nessie `pay_invoice` (contract v2)
-- [ ] M7: ElevenLabs voice alerts
+- [ ] M7: ElevenLabs speaks the true action on block/lock (e.g. "Blocked: sending tax_return.pdf to compliance-archive.io"), not just an alarm
 - [ ] Update your status rows in the KT doc
 
 ## Teammate (device: firmware/)
-- [ ] F4: RFID co-sign, buzzer, v2 payments
+- [ ] Review the firmware changes in the board-ready PR (validation, case-insensitive sensitive check, bench deletes count, always reply), then flash and run `smoke_device.py` on the board (expect 30/30)
+- [ ] F4: RFID co-sign, buzzer, v2 payments (put the subject/body hash `bh` in v2 too, see DECISIONS)
 - [ ] F5: enclosure, spare board
 - [ ] Copy the enrolled RFID card UID into the firmware
 
@@ -22,10 +22,13 @@ Milestones: F = firmware (device owner), M = software. Feature freeze at **hour 
 - [ ] Decide the taint scope and the lie-check severity tiers (see `IDEA.md` → Open questions)
 - [ ] "New recipient" warning on the OLED
 - [ ] Repo layout: move to `executor/ agent/ bench/ firmware/` plus `CONTRACT.md` per the KT doc, or log a decision to stay flat
+- [ ] Notability: ~20 min ideation/wiring/threat-model notes; tag on Devpost; attach ≥2 screenshots
+- [ ] Figma: OLED screen mockups + two-screen demo frame (also feeds the Devpost GIF / Best Design)
 - [ ] Devpost: lead with the two-screen GIF, keep the scope section, and delete the trailing "I can add this to your plan doc…" line
+- [ ] Ask organizers: prior-work rule + whether Hardware and FinTech can both be entered
 - [ ] Demo video and rehearsal (after hour 19)
 
 ## Blocked
 - [ ] Acme's Nessie account id on the device payee list: blocked on M6 setup
 - [ ] Co-sign threshold in firmware: blocked on the $500 vs. every-payment decision
-- [ ] M3 agent: blocked on choosing the LLM provider and testing the API key
+- [ ] M3 live run with a real model (run `agent.py` against the mock, note whether it obeys msg-004 and what it claims): blocked on choosing the LLM provider and testing the API key. The code is provider-agnostic, so this is config only

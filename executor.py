@@ -45,9 +45,18 @@ class PinError(Exception):
 # ---------------------------------------------------------------- device link
 
 class DeviceLink:
-    """One JSON line out, one JSON line back. Works for socket:// and real serial."""
+    """One JSON line out, one JSON line back. Works for socket:// and real serial.
 
-    def __init__(self, url=DEVICE_PORT, timeout=DEVICE_TIMEOUT_S):
+    Real ESP32 quirks: toggling DTR/RTS on open reboots the board, so both are held low
+    before the port opens; and the board prints boot/debug text, so any line that isn't a
+    JSON object is skipped.
+    """
+
+    def __init__(self, url=DEVICE_PORT, timeout=DEVICE_TIMEOUT_S, port=None, settle_s=None):
+        self.timeout = timeout
+        if port is not None:                # tests inject a fake port
+            self.port = port
+            return
         try:
             # Open with DTR/RTS deasserted so opening the port doesn't pull the
             # ESP32 into reset (the usbserial auto-reset lines). Harmless/no-op
@@ -63,8 +72,14 @@ class DeviceLink:
             time.sleep(0.3)   # let the usbserial adapter settle before the first write
         except (serial.SerialException, OSError) as e:
             raise DeviceError(f"cannot open device at {url}: {e}") from e
+        if settle_s is None:
+            settle_s = 0 if url.startswith(("socket://", "loop://")) else 2.0
+        if settle_s:
+            time.sleep(settle_s)            # in case the board reset anyway: let it boot
+            self.port.reset_input_buffer()
 
     def call(self, obj):
+        deadline = time.monotonic() + self.timeout
         try:
             self.port.reset_input_buffer()     # drop any stale reply from a timed-out call
             self.port.write(protocol.encode(obj))
@@ -72,13 +87,14 @@ class DeviceLink:
                 line = self.port.readline(protocol.MAX_LINE + 1)
                 if not line:
                     raise DeviceError("no reply from device (timeout)")
-                if len(line) > protocol.MAX_LINE or not line.endswith(b"\n"):
-                    raise DeviceError("reply too long or truncated")
                 if line.lstrip().startswith(b"{"):
                     break
-                # otherwise an ESP32 boot-banner line (rst:..., load:...); skip it
+                if time.monotonic() > deadline:  # endless boot noise counts as a timeout
+                    raise DeviceError("no reply from device (only non-JSON output)")
         except (serial.SerialException, OSError) as e:
             raise DeviceError(f"device link error: {e}") from e
+        if len(line) > protocol.MAX_LINE or not line.endswith(b"\n"):
+            raise DeviceError("reply too long or truncated")
         try:
             return protocol.decode(line)
         except (ValueError, UnicodeDecodeError) as e:
