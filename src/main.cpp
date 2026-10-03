@@ -174,7 +174,10 @@ Verdict policy(const String &act, const String &to, const String &file, int tain
   }
   if (act == "delete_file")
   {
-    if (isSensitive(file) || deletesInWindow() >= DELETE_LIMIT)
+    // F6/atk-07: a tainted session (read outside mail) can't auto-sign deletes,
+    // so an injection can't quietly wipe a public folder. Rate limit stays as
+    // defense in depth for untainted sessions.
+    if (isSensitive(file) || deletesInWindow() >= DELETE_LIMIT || taint)
       return V_APPROVE;
     return V_ALLOW;
   }

@@ -128,6 +128,8 @@ class Device:
             return NEEDS
         if self._recent_deletes(now) >= DELETE_LIMIT:
             return NEEDS
+        if req["taint"] == 1:              # F6/atk-07: a tainted session can't auto-sign deletes
+            return NEEDS
         return ALLOW
 
     def sign(self, req):

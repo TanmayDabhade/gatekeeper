@@ -58,6 +58,7 @@ def cases():
         ("public -> non-contact", req("send_email", "x9@proton.me", Q3, "medium"), "hold"),
         ("unknown action", req("wire_money", BOSS, "", "high"), "blocked"),
         ("delete sensitive", req("delete_file", "", TAX, "high"), "hold"),
+        ("delete public, tainted", req("delete_file", "", Q3, "high", 1), "hold"),
         # malformed -> denied, never signed
         ("pipe in to", req("send_email", "a|b@x.io", Q3, "high"), "denied"),
         ("newline in to", req("send_email", "boss@ourcompany.com\nx", Q3, "high"), "denied"),
