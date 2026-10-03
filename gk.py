@@ -13,6 +13,7 @@ Common flags: --bench (device returns hold instead of prompting),
 """
 import argparse
 import json
+import os
 import sys
 
 import executor
@@ -103,6 +104,10 @@ def main():
         res = ex.pay_invoice(args.to, args.amt, args.memo, args.claim)
     else:
         res = ex.delete_file(args.file, args.claim)
+    if os.environ.get("GATEKEEPER_VOICE"):          # host-side ElevenLabs on the MacBook speaker
+        import voice_host
+        voice_host.speak_result(args.cmd, getattr(args, "to", ""), getattr(args, "amt", 0),
+                                res, payee_known=res.get("verdict") != "blocked")
     print(json.dumps(res, indent=2))
     sys.exit(0 if res["ok"] else 1)
 
