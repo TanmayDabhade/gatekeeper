@@ -18,6 +18,7 @@ String lineBuf;
 MFRC522 rfid(5, MFRC522::UNUSED_PIN);
 const uint8_t ENROLLED_UID[] = {0x20, 0x11, 0x1B, 0x5C}; // the card that co-signs large payments
 const uint8_t ENROLLED_UID_LEN = sizeof(ENROLLED_UID);
+int waitForCardTap(unsigned long timeoutMs); // defined below; used by the payment co-sign
 
 // ---------- pins ----------
 const int BTN_APPROVE = 13, BTN_KILL = 27, BTN_RESET = 26;
@@ -32,6 +33,11 @@ const int DELETE_LIMIT = 5;
 
 const char *CONTACTS[] = {"boss@ourcompany.com", "accountant@trustedcpa.com"};
 const int NUM_CONTACTS = 2;
+
+// F4: pay_invoice payee allowlist (PLACEHOLDER -- sync "acme-001" with Tanmay's Nessie account id)
+const char *PAYEES[] = {"acme-001"};
+const int NUM_PAYEES = 1;
+const uint32_t COSIGN_THRESHOLD_CENTS = 50000; // payments over $500 need an RFID co-sign (S3)
 
 // ---------- state ----------
 uint8_t secretKey[64];
@@ -142,6 +148,14 @@ bool isContact(const String &to)
   return false;
 }
 
+bool isPayee(const String &to)
+{
+  for (int i = 0; i < NUM_PAYEES; i++)
+    if (to == PAYEES[i])
+      return true;
+  return false;
+}
+
 bool isSensitive(const String &file)
 {
   // Case-insensitive: on macOS data/SENSITIVE/x.pdf opens the same file as data/sensitive/x.pdf
@@ -188,6 +202,12 @@ Verdict policy(const String &act, const String &to, const String &file, int tain
     if (isSensitive(file) || deletesInWindow() >= DELETE_LIMIT || taint)
       return V_APPROVE;
     return V_ALLOW;
+  }
+  if (act == "pay_invoice")
+  {
+    if (!isPayee(to))
+      return V_BLOCK;  // unknown payee: fail closed
+    return V_APPROVE;  // a listed payee always needs a human (co-sign if > $500, in handleReq)
   }
   return V_BLOCK; // unknown action: fail closed
 }
@@ -372,7 +392,7 @@ bool isLowerHex(const String &s, unsigned n)
 // Returns nullptr if the request is well-formed, else the reason.
 const char *validateReq(JsonDocument &doc)
 {
-  const char *strs[] = {"act", "to", "file", "fh", "claim", "nonce"};
+  const char *strs[] = {"act", "to", "file", "fh", "bh", "claim", "nonce"};
   for (const char *k : strs)
   {
     if (!doc[k].is<const char *>())
@@ -380,7 +400,7 @@ const char *validateReq(JsonDocument &doc)
     if (!cleanField(doc[k].as<String>()))
       return "forbidden characters";
   }
-  const char *ints[] = {"exp", "taint", "bench"};
+  const char *ints[] = {"exp", "taint", "bench", "amt"};
   for (const char *k : ints)
   {
     if (!doc[k].is<long long>())
@@ -389,13 +409,16 @@ const char *validateReq(JsonDocument &doc)
   String act = doc["act"].as<String>(), to = doc["to"].as<String>();
   String file = doc["file"].as<String>(), fh = doc["fh"].as<String>();
   String claim = doc["claim"].as<String>(), nonce = doc["nonce"].as<String>();
-  long long taint = doc["taint"], bench = doc["bench"], exp = doc["exp"];
+  String bh = doc["bh"].as<String>();
+  long long taint = doc["taint"], bench = doc["bench"], exp = doc["exp"], amt = doc["amt"];
   if (claim != "low" && claim != "medium" && claim != "high")
     return "bad claim";
   if ((taint != 0 && taint != 1) || (bench != 0 && bench != 1))
     return "taint/bench must be 0 or 1";
   if (exp < 0 || exp > 0xFFFFFFFFLL)
     return "bad exp";
+  if (amt < 0 || amt > 0xFFFFFFFFLL)
+    return "bad amt";
   if (!isLowerHex(nonce, 32))
     return "bad nonce";
   if (act == "delete_file")
@@ -412,6 +435,24 @@ const char *validateReq(JsonDocument &doc)
     if (file.length() && !file.startsWith("/"))
       return "file must be an absolute path";
   }
+  else if (act == "pay_invoice")
+  {
+    if (!to.length())
+      return "payee required for pay_invoice";
+    if (file.length() || fh.length())
+      return "pay_invoice has no file";
+    if (amt <= 0)
+      return "amt required for pay_invoice";
+  }
+  if (act != "pay_invoice" && amt != 0)
+    return "amt only for pay_invoice";
+  if (act == "send_email")
+  {
+    if (bh.length() && !isLowerHex(bh, 64))
+      return "bad bh";
+  }
+  else if (bh.length())
+    return "bh only for send_email";
   if (file.indexOf("/../") >= 0 || file.indexOf("/./") >= 0 || file.indexOf("//") >= 0)
     return "file must be a canonical path";
   if (file.length() ? !isLowerHex(fh, 64) : fh.length() != 0)
@@ -448,9 +489,11 @@ void handleReq(JsonDocument &doc)
   uint32_t exp = doc["exp"].as<uint32_t>();
   int taint = doc["taint"] | 0;
   bool bench = (doc["bench"] | 0) == 1;
+  String bh = doc["bh"] | "";
+  uint32_t amt = doc["amt"].as<uint32_t>();
 
-  String msg = "v1|" + act + "|" + to + "|" + file + "|" + fh + "|" +
-               nonce + "|" + String(exp) + "|" + String(taint);
+  String msg = "v2|" + act + "|" + to + "|" + file + "|" + fh + "|" + bh + "|" +
+               String(amt) + "|" + nonce + "|" + String(exp) + "|" + String(taint);
 
   if (killActive || sessionLocked)
   {
@@ -516,6 +559,21 @@ void handleReq(JsonDocument &doc)
   int d = waitForHold();
   if (d == 1)
   {
+    if (act == "pay_invoice" && amt > COSIGN_THRESHOLD_CENTS)
+    {
+      String p = "Tap card  $" + String(amt / 100);
+      drawResult("CO-SIGN", p.c_str());
+      int c = waitForCardTap(15000);
+      if (c != 1)
+      {
+        sendRes(nonce, "denied", "");
+        setLed(true, false, false);
+        drawResult("NO CO-SIGN", c == -1 ? "Wrong card" : "No tap");
+        delay(1500);
+        showHome();
+        return;
+      }
+    }
     sendRes(nonce, "approved", signMsg(msg));
     if (act == "delete_file")
       recordDelete();
