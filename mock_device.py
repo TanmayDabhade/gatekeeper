@@ -24,7 +24,7 @@ CONTACTS = {"boss@ourcompany.com", "accountant@trustedcpa.com"}
 SENSITIVE_MARKER = "/data/sensitive/"
 DELETE_LIMIT = 5          # more than 5 deletes...
 DELETE_WINDOW_S = 600     # ...in 10 minutes -> needs approval
-# v2 payments: only these Nessie accounts can be paid, and every payment needs a human.
+# pay_invoice: only these Nessie accounts can be paid, and every payment needs a human.
 PAYEES = {"7083a93b-e422-4fa6-8188-330034f0c237": "Acme Supplies"}
 COSIGN_CENTS = 50000      # more than $500 also needs the RFID card (S3)
 
@@ -74,17 +74,25 @@ def validate(req):
     for k in ("exp", "taint", "bench"):
         if type(req.get(k)) is not int:
             return f"{k} must be an integer"
-    if req["act"] in protocol.V2_ACTIONS:
-        if type(req.get("amt")) is not int or not 0 < req["amt"] <= protocol.MAX_AMOUNT_CENTS:
-            return "amt must be a positive integer number of cents"
-        if not isinstance(req.get("bh"), str) or not HEX64.fullmatch(req["bh"]):
-            return "bh must be 64 lowercase hex"
+    # v2: every request carries amt and bh (docs/CONTRACT.md)
+    if type(req.get("amt")) is not int:
+        return "amt must be an integer"
+    if not isinstance(req.get("bh"), str) or any(ord(c) < 32 or ord(c) >= 0x7F for c in req["bh"]):
+        return "bh must be a string"
+    if req["act"] == "pay_invoice":
+        if not 0 < req["amt"] <= protocol.MAX_AMOUNT_CENTS:
+            return "amt must be a positive number of cents"
         if not PAYEE_RE.fullmatch(req["to"]):
             return "to must be a payee account id"
-        if req["file"] != "" or req["fh"] != "":
-            return "file and fh must be empty for pay_invoice"
-    elif "amt" in req or "bh" in req:
-        return "amt and bh are only for pay_invoice"
+        if req["file"] != "" or req["fh"] != "" or req["bh"] != "":
+            return "file, fh and bh must be empty for pay_invoice"
+    else:
+        if req["amt"] != 0:
+            return "amt must be 0 unless the action is pay_invoice"
+        if req["act"] == "send_email" and not HEX64.fullmatch(req["bh"]):
+            return "bh must be 64 lowercase hex for send_email"
+        if req["act"] != "send_email" and req["bh"] != "":
+            return "bh must be empty unless the action is send_email"
     if req["claim"] not in protocol.CLAIMS:
         return "claim must be low|medium|high"
     if req["taint"] not in (0, 1) or req["bench"] not in (0, 1):
@@ -154,7 +162,7 @@ class Device:
     def sign(self, req):
         msg = protocol.signed_message(req["act"], req["to"], req["file"], req["fh"],
                                       req["nonce"], req["exp"], req["taint"],
-                                      req.get("amt", 0), req.get("bh", ""))
+                                      req["amt"], req["bh"])
         return self.sk.sign(msg).signature.hex()
 
     # ---- request handling ----
@@ -237,7 +245,6 @@ class Device:
                 rows.append("! NOT A KNOWN PAYEE")
             if req["amt"] > COSIGN_CENTS:
                 rows.append("! CO-SIGN (card)")
-            rows.append(f"memo: {req['bh'][:12]}")
             if req["taint"]:
                 rows.append("! TAINTED SESSION")
             rows.append(f"claim: {req['claim'].upper()}")

@@ -24,7 +24,7 @@ lib/monocypher/   Ed25519 for the firmware
 test_device.py    board-only: ping and a request (device owner)
 test_sign.py      board-only: signature and tamper check, needs a button press
 test_policy.py    board-only: every policy case with button prompts
-protocol.py       wire contract: v1 for send/delete, v2 (adds amt + bh) for pay_invoice. Firmware must match byte for byte
+protocol.py       wire contract v2 (docs/CONTRACT.md): signed string, verdicts, body_hash. Firmware must match byte for byte
 executor.py       host side: device link, key pinning, checks, email/delete/sandbox
 mock_device.py    fake device: policy, signing, OLED render, keyboard approve/deny
 config.py         host config only (device policy deliberately lives on the device)
@@ -47,7 +47,7 @@ make_data.py      generates the fake PDFs in data/
 data/             inbox.json (includes a phishing email), public/ and sensitive/ PDFs
 docs/             shared context: IDEA, DECISIONS, TODO, SYNC_PROMPT
 ```
-The KT doc plans `firmware/ executor/ agent/ bench/` plus `CONTRACT.md`, but everything, including the firmware, is at the repo root. Don't restructure until there's a DECISIONS entry (open item in TODO). Until `CONTRACT.md` exists, `protocol.py` plus the KT doc *is* the contract.
+The KT doc plans `firmware/ executor/ agent/ bench/` plus `CONTRACT.md`, but everything, including the firmware, is at the repo root. Don't restructure until there's a DECISIONS entry (open item in TODO). `docs/CONTRACT.md` is the contract; `protocol.py` implements it.
 
 ## Conventions
 - **Ownership:** software touches only executor, agent and bench code, never `firmware/`. Nothing new after hour 19.

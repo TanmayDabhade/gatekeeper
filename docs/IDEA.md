@@ -44,7 +44,7 @@ From the KT doc (tick these off as they land):
 - [ ] Prior-work rule confirmed with organizers
 - [x] Fetch.ai ASI:One: **no-go** (see DECISIONS 2026-10-03 11:14)
 - [ ] Can we enter both Hardware and FinTech? Ask organizers at check-in
-- [x] Co-sign threshold: more than $500 (DECISIONS 2026-10-03 16:30)
+- [x] Co-sign threshold: more than $500 (docs/CONTRACT.md)
 - [ ] LLM provider chosen and API key tested with credits
 - [ ] Enrolled RFID card UID copied into the firmware
 - [x] Acme's Nessie account id added to the mock's payee list (firmware at F4)

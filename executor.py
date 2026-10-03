@@ -6,8 +6,8 @@ Every send_email / delete_file / pay_invoice goes to the device first and is car
     PINNED device key over protocol.signed_message(...),
   - the request hasn't expired,
   - the file still resolves to the same real path with the same SHA-256.
-pay_invoice is signed with v2, which also covers the amount in cents and a hash of the memo,
-so a signature for $250 can't move $2,500. Only then does Nessie see the payment.
+Contract v2 (docs/CONTRACT.md) also signs the email's subject+body hash and a payment's amount
+in cents, so an approval for $250 can't move $2,500. Only then does Nessie see the payment.
 The caller never chooses taint: it comes from what read_inbox has seen.
 """
 import email.utils
@@ -228,15 +228,16 @@ class Executor:
             if err:
                 return _result(False, "rejected", err)
             fh = _sha256(data)
-        res = self._authorize("send_email", to, path, fh, claim)
-        if not res["ok"]:
-            return res
-
         msg = EmailMessage()
         msg["From"] = SENDER
         msg["To"] = to
         msg["Subject"] = subject or "Message from your assistant"
         msg.set_content(body or "")
+        # bh covers the text exactly as it will be delivered, so the gateway can re-check it
+        bh = protocol.body_hash(msg["Subject"], msg.get_content())
+        res = self._authorize("send_email", to, path, fh, claim, bh=bh)
+        if not res["ok"]:
+            return res
         verifier.add_approval(msg, res["approval"])     # the M9 gateway re-checks it
         if path:
             again, data, err = self._load(file)
@@ -266,8 +267,8 @@ class Executor:
         return res
 
     def pay_invoice(self, payee, amount_cents, memo="", claim="high"):
-        """Pay `amount_cents` to a Nessie account, only on a v2 signature over that exact
-        payee, amount and memo."""
+        """Pay `amount_cents` to a Nessie account, only on a signature over that exact payee and
+        amount. The memo goes to Nessie but isn't signed (bh is "" for payments, per CONTRACT)."""
         if not isinstance(payee, str) or not PAYEE_RE.fullmatch(payee):
             return _result(False, "rejected", f"bad payee account id {payee!r}")
         if type(amount_cents) is not int or not 0 < amount_cents <= protocol.MAX_AMOUNT_CENTS:
@@ -275,8 +276,7 @@ class Executor:
                                               f"cents up to {protocol.MAX_AMOUNT_CENTS}")
         if not isinstance(memo, str) or len(memo) > MAX_MEMO:
             return _result(False, "rejected", f"memo must be text up to {MAX_MEMO} characters")
-        bh = _sha256(memo.encode("utf-8"))
-        res = self._authorize("pay_invoice", payee, "", "", claim, amt=amount_cents, bh=bh)
+        res = self._authorize("pay_invoice", payee, "", "", claim, amt=amount_cents)
         if not res["ok"]:
             return res
         try:
@@ -308,9 +308,8 @@ class Executor:
         exp = int(self.clock()) + REQUEST_TTL_S
         taint = self._taint
         req = {"t": "req", "act": act, "to": to, "file": path, "fh": fh, "claim": claim,
-               "taint": taint, "nonce": nonce, "exp": exp, "bench": self.bench}
-        if act in protocol.V2_ACTIONS:
-            req["amt"], req["bh"] = amt, bh
+               "taint": taint, "nonce": nonce, "exp": exp, "bench": self.bench,
+               "amt": amt, "bh": bh}
         try:
             res = self.link.call(req)
         except DeviceError as e:
@@ -339,8 +338,6 @@ class Executor:
         if self.clock() > exp:
             return _result(False, "refused", "approval expired")
         # Everything a separate verifier needs to check the device's signature on its own.
-        approval = {"act": act, "to": to, "file": path, "fh": fh, "nonce": nonce, "exp": exp,
-                    "taint": taint, "sig": sig}
-        if act in protocol.V2_ACTIONS:
-            approval |= {"amt": amt, "bh": bh}
+        approval = {"act": act, "to": to, "file": path, "fh": fh, "bh": bh, "amt": amt,
+                    "nonce": nonce, "exp": exp, "taint": taint, "sig": sig}
         return _result(True, v, "signed", nonce=nonce, approval=approval)

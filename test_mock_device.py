@@ -58,7 +58,7 @@ def test_lookalike_payee_blocked_even_with_card(monkeypatch):
     assert _pay(dev, 25000, "c", to=smoke_device.LOOKALIKE)["v"] == "blocked"
 
 
-def test_payment_signature_covers_amount_and_memo(monkeypatch):
+def test_payment_signature_covers_the_amount(monkeypatch):
     monkeypatch.setattr(mock_device, "say", lambda *a: None)
     dev = mock_device.Device()
     dev.wait_for_human = lambda: "a"
@@ -66,8 +66,8 @@ def test_payment_signature_covers_amount_and_memo(monkeypatch):
     sig = bytes.fromhex(dev.handle(r)["sig"])
     vk = VerifyKey(bytes.fromhex(dev.pk_hex))
     args = (r["act"], r["to"], r["file"], r["fh"], r["nonce"], r["exp"], r["taint"])
-    vk.verify(protocol.signed_message(*args, 25000, r["bh"]), sig)
-    for amt, bh in ((250000, r["bh"]), (25000, "0" * 64)):
+    vk.verify(protocol.signed_message(*args, 25000, ""), sig)
+    for amt, bh in ((250000, ""), (25000, "0" * 64)):
         try:
             vk.verify(protocol.signed_message(*args, amt, bh), sig)
             raise AssertionError("signature verified for a different amount or memo")
