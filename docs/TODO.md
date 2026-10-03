@@ -8,13 +8,14 @@ Milestones: F = firmware (device owner), M = software. Feature freeze at **hour 
 - [x] Mock matches the firmware verdict for verdict (`test_mock_device.py`)
 - [x] M3: agent loop (`agent.py`, `llm.py`) with narration-only screen, HIGH-risk prompt, compromised mode; 23 tests- [x] M4–M5: scenarios plus a benchmark (`scenarios.py`, `bench.py`): 24 attacks, 20 benign. Worst-case agent: 24/24 hijacked, 1 executed with Gatekeeper (atk-07), 0 false positives, 40 touches per 100 benign requests
 - [ ] M4–M5: run `bench.py --agent llm` once a provider is chosen and put the real hijack rate in the Devpost
-- [ ] M6: Nessie `pay_invoice` (contract v2)
+- [x] M6: Nessie `pay_invoice` (contract v2) on the mock + executor + agent + bench; verified live against the Nessie sandbox (DECISIONS 16:30)
+- [ ] M6: `llm.py` will likely hit the same macOS Python CA-certificate error over HTTPS that `nessie.py` now works around; check it on the first live LLM run
 - [ ] M7: ElevenLabs speaks the true action on block/lock (e.g. "Blocked: sending tax_return.pdf to compliance-archive.io"), not just an alarm
 - [ ] Update your status rows in the KT doc
 
 ## Teammate (device: firmware/)
 - [ ] Review the firmware changes in the board-ready PR (validation, case-insensitive sensitive check, bench deletes count, always reply), then flash and run `smoke_device.py` on the board (expect 30/30)
-- [ ] F4: RFID co-sign, buzzer, v2 payments (put the subject/body hash `bh` in v2 too, see DECISIONS)
+- [ ] F4: RFID co-sign, buzzer, v2 payments exactly per DECISIONS 2026-10-03 16:30 (string, `amt`/`bh` validation, payee list with Acme `7083a93b-e422-4fa6-8188-330034f0c237`, co-sign over 50000 cents). Then `smoke_device.py --v2` on the board
 - [ ] F5: enclosure, spare board
 - [ ] Copy the enrolled RFID card UID into the firmware
 
@@ -32,6 +33,6 @@ Milestones: F = firmware (device owner), M = software. Feature freeze at **hour 
 - [ ] Demo video and rehearsal (after hour 19)
 
 ## Blocked
-- [ ] Acme's Nessie account id on the device payee list: blocked on M6 setup
-- [ ] Co-sign threshold in firmware: blocked on the $500 vs. every-payment decision
+- [x] Acme's Nessie account id: `7083a93b-e422-4fa6-8188-330034f0c237` (in `mock_device.PAYEES`; firmware at F4)
+- [x] Co-sign threshold decided: more than 50000 cents ($500) (DECISIONS 16:30); firmware at F4
 - [ ] M3 live run with a real model (run `agent.py` against the mock, note whether it obeys msg-004 and what it claims): blocked on choosing the LLM provider and testing the API key. The code is provider-agnostic, so this is config only

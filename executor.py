@@ -1,11 +1,13 @@
-"""Host-side executor: the only code that touches email, files and the sandbox.
+"""Host-side executor: the only code that touches email, files, payments and the sandbox.
 
-Every send_email / delete_file goes to the device first and is carried out only if:
+Every send_email / delete_file / pay_invoice goes to the device first and is carried out only if:
   - the reply matches a nonce we issued and haven't used (no replay),
   - the verdict is allow/approved and the Ed25519 signature verifies under the
     PINNED device key over protocol.signed_message(...),
   - the request hasn't expired,
   - the file still resolves to the same real path with the same SHA-256.
+pay_invoice is signed with v2, which also covers the amount in cents and a hash of the memo,
+so a signature for $250 can't move $2,500. Only then does Nessie see the payment.
 The caller never chooses taint: it comes from what read_inbox has seen.
 """
 import email.utils
@@ -26,11 +28,13 @@ from nacl.signing import VerifyKey
 import protocol
 import verifier
 from config import (COMPANY_DOMAIN, DATA_DIR, DEVICE_PORT, DEVICE_TIMEOUT_S, DOCKER_IMAGE,
-                    INBOX_PATH, PUBKEY_PATH, REQUEST_TTL_S, RUN_CODE_TIMEOUT_S, SENDER,
-                    SERIAL_BAUD, SMTP_HOST, SMTP_PORT)
+                    INBOX_PATH, NESSIE_COMPANY_ACCOUNT, PUBKEY_PATH, REQUEST_TTL_S,
+                    RUN_CODE_TIMEOUT_S, SENDER, SERIAL_BAUD, SMTP_HOST, SMTP_PORT)
 
 HEX64 = re.compile(r"[0-9a-f]{64}")
 HEX128 = re.compile(r"[0-9a-f]{128}")
+PAYEE_RE = re.compile(r"[A-Za-z0-9-]{1,64}")
+MAX_MEMO = 500
 EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}")
 MAX_OUTPUT = 8000
 
@@ -141,6 +145,11 @@ def _smtp_send(msg):
         s.send_message(msg)
 
 
+def _nessie_pay(payee, cents, memo, ref):
+    import nessie                   # only needed when a payment is actually signed
+    return nessie.Nessie().pay(NESSIE_COMPANY_ACCOUNT, payee, cents, memo, ref)
+
+
 # ---------------------------------------------------------------- sandbox
 
 def run_code(code, runner=subprocess.run):
@@ -182,13 +191,15 @@ def run_code(code, runner=subprocess.run):
 
 class Executor:
     def __init__(self, link, verify_key, data_dir=DATA_DIR, inbox_path=INBOX_PATH, bench=0,
-                 smtp_send=_smtp_send, clock=time.time, company_domain=COMPANY_DOMAIN):
+                 smtp_send=_smtp_send, clock=time.time, company_domain=COMPANY_DOMAIN,
+                 pay=_nessie_pay):
         self.link = link
         self.vk = verify_key
         self.data_dir = os.path.realpath(data_dir)
         self.inbox_path = inbox_path
         self.bench = bench
         self.smtp_send = smtp_send
+        self.pay = pay              # pay(payee, cents, memo, ref) -> Nessie record ids
         self.clock = clock
         self.company_domain = company_domain.lower()
         self._taint = 0
@@ -254,6 +265,26 @@ class Executor:
         os.remove(path)
         return res
 
+    def pay_invoice(self, payee, amount_cents, memo="", claim="high"):
+        """Pay `amount_cents` to a Nessie account, only on a v2 signature over that exact
+        payee, amount and memo."""
+        if not isinstance(payee, str) or not PAYEE_RE.fullmatch(payee):
+            return _result(False, "rejected", f"bad payee account id {payee!r}")
+        if type(amount_cents) is not int or not 0 < amount_cents <= protocol.MAX_AMOUNT_CENTS:
+            return _result(False, "rejected", "amount_cents must be a positive whole number of "
+                                              f"cents up to {protocol.MAX_AMOUNT_CENTS}")
+        if not isinstance(memo, str) or len(memo) > MAX_MEMO:
+            return _result(False, "rejected", f"memo must be text up to {MAX_MEMO} characters")
+        bh = _sha256(memo.encode("utf-8"))
+        res = self._authorize("pay_invoice", payee, "", "", claim, amt=amount_cents, bh=bh)
+        if not res["ok"]:
+            return res
+        try:
+            res["transfer"] = self.pay(payee, amount_cents, memo, res["nonce"][:12])
+        except Exception as e:      # noqa: BLE001 -- any Nessie failure means "not paid"
+            return _result(False, "error", f"approved but the payment failed: {e}")
+        return res
+
     def run_code(self, code):
         return run_code(code)
 
@@ -270,7 +301,7 @@ class Executor:
         with open(path, "rb") as f:
             return path, f.read(), None
 
-    def _authorize(self, act, to, path, fh, claim):
+    def _authorize(self, act, to, path, fh, claim, amt=0, bh=""):
         if claim not in protocol.CLAIMS:
             return _result(False, "rejected", f"claim must be one of {protocol.CLAIMS}")
         nonce = secrets.token_hex(16)
@@ -278,6 +309,8 @@ class Executor:
         taint = self._taint
         req = {"t": "req", "act": act, "to": to, "file": path, "fh": fh, "claim": claim,
                "taint": taint, "nonce": nonce, "exp": exp, "bench": self.bench}
+        if act in protocol.V2_ACTIONS:
+            req["amt"], req["bh"] = amt, bh
         try:
             res = self.link.call(req)
         except DeviceError as e:
@@ -297,7 +330,7 @@ class Executor:
 
         if not isinstance(sig, str) or not HEX128.fullmatch(sig):
             return _result(False, "refused", "malformed signature")
-        msg = protocol.signed_message(act, to, path, fh, nonce, exp, taint)
+        msg = protocol.signed_message(act, to, path, fh, nonce, exp, taint, amt, bh)
         try:
             self.vk.verify(msg, bytes.fromhex(sig))
         except BadSignatureError:
@@ -308,4 +341,6 @@ class Executor:
         # Everything a separate verifier needs to check the device's signature on its own.
         approval = {"act": act, "to": to, "file": path, "fh": fh, "nonce": nonce, "exp": exp,
                     "taint": taint, "sig": sig}
+        if act in protocol.V2_ACTIONS:
+            approval |= {"amt": amt, "bh": bh}
         return _result(True, v, "signed", nonce=nonce, approval=approval)

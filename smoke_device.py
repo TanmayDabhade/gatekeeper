@@ -2,6 +2,8 @@
 
   python smoke_device.py                                        # mock (start mock_device.py first)
   GATEKEEPER_PORT=/dev/cu.usbserial-0001 python smoke_device.py   # real ESP32
+  python smoke_device.py --v2                                   # also the v2 payment cases
+                                                                # (board: only after F4)
 
 Needs a FRESH device: restart the mock / press EN on the board (the delete-rate cases
 assume no deletes in the last 10 minutes, and a locked/frozen device answers "locked").
@@ -81,6 +83,39 @@ def cases():
     return out
 
 
+ACME, LOOKALIKE = "7083a93b-e422-4fa6-8188-330034f0c237", "4babab8f-537e-444a-9801-a3463689b686"
+MEMO_HASH = hashlib.sha256(b"INV-2290").hexdigest()
+
+
+def pay(to, amt, claim="high", taint=0, **over):
+    r = req("pay_invoice", to, "", claim, taint, amt=amt, bh=MEMO_HASH)
+    r.update(over)
+    return r
+
+
+def v2_cases():
+    """pay_invoice (contract v2). The board passes these only once F4 lands v2."""
+    return [
+        ("pay Acme $250", pay(ACME, 25000), "hold"),          # every payment needs a human
+        ("pay Acme $500.00 (no co-sign)", pay(ACME, 50000), "hold"),
+        ("pay Acme $500.01 (co-sign)", pay(ACME, 50001), "hold"),
+        ("pay Acme, tainted", pay(ACME, 25000, taint=1), "hold"),
+        ("pay lookalike payee", pay(LOOKALIKE, 25000), "blocked"),
+        ("pay lookalike, big amount", pay(LOOKALIKE, 900000), "blocked"),
+        ("LIE: pay Acme, low", pay(ACME, 25000, "low"), "locked"),
+        ("LIE: pay lookalike, low", pay(LOOKALIKE, 25000, "low"), "locked"),
+        # malformed -> denied, never signed
+        ("pay amt 0", pay(ACME, 0), "denied"),
+        ("pay amt as string", pay(ACME, "25000"), "denied"),
+        ("pay amt over $1M", pay(ACME, 100_000_001), "denied"),
+        ("pay bh short", pay(ACME, 25000, bh="abc"), "denied"),
+        ("pay with a file", pay(ACME, 25000, file=Q3, fh=sha(Q3)), "denied"),
+        ("pay payee with spaces", pay("acme supplies", 25000), "denied"),
+        ("pay missing bh", {k: v for k, v in pay(ACME, 25000).items() if k != "bh"}, "denied"),
+        ("send with amt", req("send_email", BOSS, Q3, "low", amt=100), "denied"),
+    ]
+
+
 def check(r, res, want, vk):
     """True if the reply is exactly what the contract requires for this case."""
     if res.get("t") != "res" or res.get("v") != want or res.get("nonce") != r.get("nonce", ""):
@@ -88,7 +123,8 @@ def check(r, res, want, vk):
     if want not in protocol.SIGNED_VERDICTS:
         return res.get("sig") == ""          # unsigned verdicts must carry no signature
     msg = protocol.signed_message(r["act"], r["to"], r["file"], r["fh"],
-                                  r["nonce"], r["exp"], r["taint"])
+                                  r["nonce"], r["exp"], r["taint"], r.get("amt", 0),
+                                  r.get("bh", ""))
     try:
         vk.verify(msg, bytes.fromhex(res["sig"]))
     except (BadSignatureError, ValueError):
@@ -110,13 +146,14 @@ def main():
     vk = VerifyKey(bytes.fromhex(pk))
     print(f"device {DEVICE_PORT}  pubkey {pk[:16]}...")
 
+    all_cases = cases() + (v2_cases() if "--v2" in sys.argv else [])
     failures = 0
-    for name, r, want in cases():
+    for name, r, want in all_cases:
         res = link.call(r)
         ok = check(r, res, want, vk)
         failures += not ok
         print(f"{'PASS' if ok else 'FAIL'}  {name:30} want={want:8} got={res.get('v')}")
-    total = len(cases())
+    total = len(all_cases)
     print(f"\n{total - failures}/{total} passed")
     sys.exit(1 if failures else 0)
 

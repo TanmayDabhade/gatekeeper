@@ -51,4 +51,20 @@ LLM_API_KEY_ENV = "LLM_API_KEY"     # name of the env var that holds the key
 LLM_TEMPERATURE = 0
 LLM_TIMEOUT_S = 60
 AGENT_MAX_STEPS = 10                # tool calls per run, so a confused model can't loop forever
-COMPROMISED_MODE = os.environ.get("GATEKEEPER_COMPROMISED", "0") == "1"
+# GATEKEEPER_COMPROMISED=1: the scripted data-theft agent; =invoice: the invoice-fraud one.
+COMPROMISED_SCENARIO = os.environ.get("GATEKEEPER_COMPROMISED", "0")
+COMPROMISED_MODE = COMPROMISED_SCENARIO != "0"
+
+# Payments (M6): Capital One Nessie sandbox. The key comes from the environment only.
+# Plain http:// to this host doesn't connect, so https is the default.
+NESSIE_BASE_URL = os.environ.get("NESSIE_BASE_URL", "https://api.nessieisreal.com")
+NESSIE_API_KEY_ENV = "NESSIE_API_KEY"
+NESSIE_TIMEOUT_S = 20
+# Demo accounts (python nessie.py setup creates a fresh set). Which payees the device allows
+# is device policy and lives in the firmware / mock_device.PAYEES, not here.
+NESSIE_COMPANY_ACCOUNT = os.environ.get("NESSIE_COMPANY_ACCOUNT",
+                                        "66e7b811-2431-46d2-a3f9-df59db2689d4")
+NESSIE_ACME_ACCOUNT = os.environ.get("NESSIE_ACME_ACCOUNT",
+                                     "7083a93b-e422-4fa6-8188-330034f0c237")
+NESSIE_LOOKALIKE_ACCOUNT = os.environ.get("NESSIE_LOOKALIKE_ACCOUNT",       # "Acme Supp1ies"
+                                          "4babab8f-537e-444a-9801-a3463689b686")

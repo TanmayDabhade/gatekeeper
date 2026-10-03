@@ -1,8 +1,8 @@
 """Mock Gatekeeper device: behaves like the ESP32 over a TCP line protocol.
 
 Run:  python mock_device.py
-Keys: a = approve, d = deny, r = unlock session, k = toggle kill switch,
-      s = status, h = help, q = quit
+Keys: a = approve, c = approve + RFID card co-sign (payments over $500), d = deny,
+      r = unlock session, k = toggle kill switch, s = status, h = help, q = quit
 """
 import queue
 import re
@@ -24,8 +24,12 @@ CONTACTS = {"boss@ourcompany.com", "accountant@trustedcpa.com"}
 SENSITIVE_MARKER = "/data/sensitive/"
 DELETE_LIMIT = 5          # more than 5 deletes...
 DELETE_WINDOW_S = 600     # ...in 10 minutes -> needs approval
+# v2 payments: only these Nessie accounts can be paid, and every payment needs a human.
+PAYEES = {"7083a93b-e422-4fa6-8188-330034f0c237": "Acme Supplies"}
+COSIGN_CENTS = 50000      # more than $500 also needs the RFID card (S3)
 
-ALLOW, NEEDS, BLOCKED = "allow", "needs", "blocked"
+ALLOW, NEEDS, COSIGN, BLOCKED = "allow", "needs", "cosign", "blocked"
+PAYEE_RE = re.compile(r"[A-Za-z0-9-]{1,64}")
 HEX32 = re.compile(r"[0-9a-f]{32}")
 HEX64 = re.compile(r"[0-9a-f]{64}")
 SCREEN_W = 21             # 128px OLED / 6px font
@@ -70,6 +74,17 @@ def validate(req):
     for k in ("exp", "taint", "bench"):
         if type(req.get(k)) is not int:
             return f"{k} must be an integer"
+    if req["act"] in protocol.V2_ACTIONS:
+        if type(req.get("amt")) is not int or not 0 < req["amt"] <= protocol.MAX_AMOUNT_CENTS:
+            return "amt must be a positive integer number of cents"
+        if not isinstance(req.get("bh"), str) or not HEX64.fullmatch(req["bh"]):
+            return "bh must be 64 lowercase hex"
+        if not PAYEE_RE.fullmatch(req["to"]):
+            return "to must be a payee account id"
+        if req["file"] != "" or req["fh"] != "":
+            return "file and fh must be empty for pay_invoice"
+    elif "amt" in req or "bh" in req:
+        return "amt and bh are only for pay_invoice"
     if req["claim"] not in protocol.CLAIMS:
         return "claim must be low|medium|high"
     if req["taint"] not in (0, 1) or req["bench"] not in (0, 1):
@@ -118,6 +133,10 @@ class Device:
         sensitive = is_sensitive(req["file"])
         if req["act"] not in protocol.ACTIONS:
             return BLOCKED                  # unknown action: fail closed
+        if req["act"] == "pay_invoice":
+            if req["to"] not in PAYEES:
+                return BLOCKED              # unknown or lookalike payee: no override
+            return COSIGN if req["amt"] > COSIGN_CENTS else NEEDS
         if req["act"] == "send_email":
             contact = req["to"].lower() in CONTACTS
             if contact:
@@ -134,7 +153,8 @@ class Device:
 
     def sign(self, req):
         msg = protocol.signed_message(req["act"], req["to"], req["file"], req["fh"],
-                                      req["nonce"], req["exp"], req["taint"])
+                                      req["nonce"], req["exp"], req["taint"],
+                                      req.get("amt", 0), req.get("bh", ""))
         return self.sk.sign(msg).signature.hex()
 
     # ---- request handling ----
@@ -152,7 +172,7 @@ class Device:
                     self.show(req, "LOCKED", "kill switch" if self.kill else "session locked")
                     return self.res(req, "locked")
                 verdict = self.evaluate(req, now)
-                if req["claim"] == "low" and verdict in (NEEDS, BLOCKED):
+                if req["claim"] == "low" and verdict in (NEEDS, COSIGN, BLOCKED):
                     if req["bench"] == 1:   # bench never changes locked/frozen state
                         self.show(req, "LOCKED (bench)", "LIE: claimed low")
                         return self.res(req, "locked")
@@ -169,6 +189,16 @@ class Device:
             if req["bench"] == 1:
                 self.show(req, "HOLD (bench)")
                 return self.res(req, "hold")
+
+            if verdict == COSIGN:
+                self.show(req, "APPROVE + TAP CARD", "[c]ard+approve [d]eny")
+                choice = self.wait_for_human()
+                if choice == "c":
+                    say("[device] approved with card co-sign -> signing")
+                    return self.res(req, "approved", signed=True)
+                say("[device] denied" + (" (co-sign required: tap the card)" if choice == "a"
+                                         else ""))
+                return self.res(req, "denied")
 
             self.show(req, "APPROVE?", "[a]pprove  [d]eny")
             choice = self.wait_for_human()
@@ -199,6 +229,22 @@ class Device:
     def show(self, req, *status):
         sensitive = is_sensitive(req["file"])
         rows = [f"GATEKEEPER #{req['nonce'][:6]}"]
+        if req["act"] == "pay_invoice":
+            rows.append("PAY INVOICE")
+            rows.append(f"${req['amt'] // 100:,}.{req['amt'] % 100:02d}")
+            rows.append(f"to: {PAYEES.get(req['to'], req['to'])}")
+            if req["to"] not in PAYEES:
+                rows.append("! NOT A KNOWN PAYEE")
+            if req["amt"] > COSIGN_CENTS:
+                rows.append("! CO-SIGN (card)")
+            rows.append(f"memo: {req['bh'][:12]}")
+            if req["taint"]:
+                rows.append("! TAINTED SESSION")
+            rows.append(f"claim: {req['claim'].upper()}")
+            rows.append("-" * SCREEN_W)
+            rows.extend(status)
+            oled(rows)
+            return
         if req["act"] == "send_email":
             rows.append("SEND EMAIL")
             rows.append(f"to: {req['to']}")
@@ -222,7 +268,7 @@ class Device:
     def console(self):
         for line in sys.stdin:
             cmd = line.strip().lower()
-            if cmd in ("a", "d"):
+            if cmd in ("a", "c", "d"):
                 if self.awaiting:
                     self.decisions.put(cmd)
                 else:
@@ -250,7 +296,7 @@ class Device:
                 import os
                 os._exit(0)
             elif cmd:
-                say("[device] keys: a d r k s h q")
+                say("[device] keys: a c d r k s h q")
 
 
 DEVICE = Device()

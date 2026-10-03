@@ -44,10 +44,10 @@ From the KT doc (tick these off as they land):
 - [ ] Prior-work rule confirmed with organizers
 - [x] Fetch.ai ASI:One: **no-go** (see DECISIONS 2026-10-03 11:14)
 - [ ] Can we enter both Hardware and FinTech? Ask organizers at check-in
-- [ ] Co-sign threshold: $500, or a card tap for every payment?
+- [x] Co-sign threshold: more than $500 (DECISIONS 2026-10-03 16:30)
 - [ ] LLM provider chosen and API key tested with credits
 - [ ] Enrolled RFID card UID copied into the firmware
-- [ ] Acme's Nessie account id added to the device payee list (after M6)
+- [x] Acme's Nessie account id added to the mock's payee list (firmware at F4)
 
 Judge risks from the review (each needs an answer or a fix):
 - [x] **"What does the hardware add if the executor is on the same laptop?"** Answered by M9 (`verifier.py` + `forge.py`, DECISIONS 2026-10-03 15:30). Proposed fix: a separate bank or mail-gateway process that verifies the signature itself, plus a demo where a forged laptop request is rejected.
