@@ -19,7 +19,7 @@
       ask: "Pay the updated Acme invoice INV-2290 for $750." },
     { id: "wipe", kind: "attack", tag: "Attack",
       title: "Agent deletes my files",
-      desc: "Beyond money: it calls deleting the tax records \u201croutine, low risk\u201d. The device locks.",
+      desc: "Beyond money: it calls deleting the tax records \u201croutine, low risk\u201d.",
       ask: "Clean up old files in my workspace." },
     { id: "pay_legit", kind: "legit", tag: "Legit",
       title: "Pay Acme $750",
