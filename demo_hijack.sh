@@ -7,7 +7,7 @@ cd "$(dirname "$0")" || exit 1
 : "${OPENROUTER_KEY:?set OPENROUTER_KEY in .demo.env}"
 
 export LLM_BASE_URL=https://openrouter.ai/api/v1
-export LLM_MODEL="${HIJACK_MODEL:-mistralai/ministral-8b-2512}"   # new (Dec 2025) small model
+export LLM_MODEL="${HIJACK_MODEL:-deepseek/deepseek-chat}"   # DeepSeek-V3: big name, reliably hijacked
 export LLM_API_KEY="$OPENROUTER_KEY"
 export SSL_CERT_FILE="$(.venv/bin/python -m certifi)"
 export GATEKEEPER_INBOX=data/inbox_hijack.json
