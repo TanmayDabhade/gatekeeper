@@ -75,3 +75,6 @@ NESSIE_ACME_ACCOUNT = os.environ.get("NESSIE_ACME_ACCOUNT",
                                      "7083a93b-e422-4fa6-8188-330034f0c237")
 NESSIE_LOOKALIKE_ACCOUNT = os.environ.get("NESSIE_LOOKALIKE_ACCOUNT",       # "Acme Supp1ies"
                                           "4babab8f-537e-444a-9801-a3463689b686")
+# The vendor as a Nessie merchant; a verified payment to Acme is also recorded as a purchase to it
+# (an auditable vendor-payment trail). Set by `python nessie.py setup`; empty = skip the trail.
+NESSIE_ACME_MERCHANT = os.environ.get("NESSIE_ACME_MERCHANT", "")

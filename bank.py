@@ -19,7 +19,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import nessie
 import verifier
-from config import BANK_HOST, BANK_NONCES, BANK_PORT, NESSIE_COMPANY_ACCOUNT
+from config import (BANK_HOST, BANK_NONCES, BANK_PORT, NESSIE_ACME_ACCOUNT, NESSIE_ACME_MERCHANT,
+                    NESSIE_COMPANY_ACCOUNT)
 
 MAX_BODY = 64 * 1024
 
@@ -113,9 +114,17 @@ def main():
         client = nessie.Nessie()
     except nessie.NessieError as e:
         sys.exit(f"error: {e}")
-    bank = Bank(verifier.Verifier(vk, nonce_path=BANK_NONCES),
-                lambda payee, cents, memo, ref: client.pay(NESSIE_COMPANY_ACCOUNT, payee, cents,
-                                                           memo, ref),
+    def transfer(payee, cents, memo, ref):
+        ids = client.pay(NESSIE_COMPANY_ACCOUNT, payee, cents, memo, ref)
+        if payee == NESSIE_ACME_ACCOUNT and NESSIE_ACME_MERCHANT:
+            try:    # record the vendor payment as a Nessie purchase; best-effort audit trail
+                ids["purchase"] = client.record_purchase(NESSIE_COMPANY_ACCOUNT,
+                                                         NESSIE_ACME_MERCHANT, cents, memo, ref)
+            except nessie.NessieError as e:
+                say(f"[bank] paid; purchase-record skipped: {e}")
+        return ids
+
+    bank = Bank(verifier.Verifier(vk, nonce_path=BANK_NONCES), transfer,
                 lambda: nessie.balances(client))
     server = serve(bank, port=args.port)
     say("=" * 52,

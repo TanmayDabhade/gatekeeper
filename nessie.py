@@ -85,6 +85,35 @@ class Nessie:
         d = self._req("POST", f"/accounts/{payee}/deposits", rec)
         return {"withdrawal": w["objectCreated"]["_id"], "deposit": d["objectCreated"]["_id"]}
 
+    # --- Merchants + Purchases: the proper Nessie model for paying a vendor ---
+    # A vendor is a Merchant; paying its invoice is a Purchase from the company account to it.
+    # This is the auditable payment trail; a blocked fraud never becomes a purchase.
+    def merchant(self, name, category="Office Supplies"):
+        addr = {"street_number": "1", "street_name": "Main St", "city": "Detroit",
+                "state": "MI", "zip": "48201"}
+        r = self._req("POST", "/merchants", {"name": name, "category": category,
+                                             "address": addr, "geocode": {"lat": 42.33, "lng": -83.04}})
+        return r["objectCreated"]["_id"]
+
+    def record_purchase(self, account, merchant_id, cents, memo, ref):
+        """Record a vendor payment as a Nessie purchase (audit trail). Returns its id."""
+        rec = {"merchant_id": merchant_id, "medium": "balance",
+               "purchase_date": datetime.date.today().isoformat(), "amount": cents // 100,
+               "status": "completed", "description": f"[gk {ref} {cents}c] {memo}"[:200]}
+        r = self._req("POST", f"/accounts/{account}/purchases", rec)
+        return r["objectCreated"]["_id"]
+
+    def purchases(self, account):
+        """Tagged vendor payments on this account, newest first: (ref, cents, memo)."""
+        out = self._records(account, "purchases")
+        rows = []
+        for p in out:
+            m = TAG.match(str(p.get("description", "")))
+            if m:
+                rows.append((m.group(1), int(m.group(2)),
+                             str(p.get("description", "")).split("] ", 1)[-1]))
+        return rows
+
     def balance_cents(self, account_id):
         """Stored balance plus recorded deposits minus withdrawals, in cents."""
         def cents(r):
@@ -123,6 +152,7 @@ def setup(client):
         a = client._req("POST", f"/customers/{c['objectCreated']['_id']}/accounts",
                         {"type": "Checking", "nickname": nick, "rewards": 0, "balance": bal})
         out.append(f"export {env}={a['objectCreated']['_id']}")
+    out.append(f"export NESSIE_ACME_MERCHANT={client.merchant('Acme Supplies')}")  # the vendor
     print("\n".join(out))
     print("# also put the new Acme id in mock_device.PAYEES (and the firmware payee list)")
 
@@ -136,8 +166,13 @@ def main():
         elif cmd == "balances":
             for name, acct, c in balances(client):
                 print(f"{name:28} {dollars(c):>14}   {acct}")
+        elif cmd == "purchases":
+            rows = client.purchases(NESSIE_COMPANY_ACCOUNT)
+            print(f"Vendor payments recorded in Nessie ({len(rows)}):")
+            for ref, cents, memo in rows:
+                print(f"  {dollars(cents):>12}  {ref:14} {memo}")
         else:
-            sys.exit("usage: python nessie.py [balances|setup]")
+            sys.exit("usage: python nessie.py [balances|setup|purchases]")
     except NessieError as e:
         sys.exit(f"error: {e}")
 
