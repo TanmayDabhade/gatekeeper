@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gatekeeper Demo</title>
+<link rel="stylesheet" href="fonts.css">
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="components.css">
+</head>
+<body>
+<div class="shell">
+
+  <main class="app" aria-label="AI assistant">
+    <header class="app-head">
+      <div class="app-mark" aria-hidden="true">A</div>
+      <div>
+        <h1 class="app-title">Acme Assistant</h1>
+        <p class="app-caption">The AI controls this screen, so it can be talked into <strong>describing a bad action as harmless</strong>.</p>
+      </div>
+    </header>
+
+    <section class="thread" id="thread" aria-live="polite">
+      <div class="thread-empty" id="empty">
+        <b>Pick a scenario below</b>
+        The assistant narrates here. The Gatekeeper on the right shows what it is really being asked to do.
+      </div>
+    </section>
+
+    <section aria-label="Scenarios">
+      <p class="dock-label">Scenarios · press 1 to 6</p>
+      <div class="dock" id="dock"></div>
+    </section>
+  </main>
+
+  <aside class="device" aria-label="Gatekeeper device">
+    <div class="device-head">
+      <div class="wordmark">GATEKEEPER<small>the screen your AI can't lie to</small></div>
+      <div class="leds" aria-hidden="true">
+        <span class="led ok" id="led-ok"></span>
+        <span class="led hold" id="led-hold"></span>
+        <span class="led stop" id="led-stop"></span>
+      </div>
+    </div>
+
+    <div class="bezel">
+      <div class="oled" id="oled" role="status" aria-live="polite">
+        <div class="oled-top"><span>GATEKEEPER</span><span id="oled-clock">--:--</span></div>
+        <div class="oled-verdict" id="oled-verdict">READY</div>
+        <div class="oled-sub" id="oled-sub">waiting for a request</div>
+      </div>
+    </div>
+
+    <p class="readout" id="readout">Every send, delete and payment the AI attempts lands here first. Nothing happens without a signature from this device.</p>
+
+    <section class="panel" aria-label="Nessie ledger">
+      <p class="panel-label"><span>Nessie ledger</span><span>via the bank</span></p>
+      <div class="ledger" id="ledger"><div class="ledger-empty">Connecting to the bank…</div></div>
+    </section>
+
+    <div class="health" id="health">
+      <span class="pill" id="h-device"><i></i>device</span>
+      <span class="pill" id="h-bank"><i></i>bank</span>
+      <span class="pill" id="h-voice"><i></i>voice</span>
+    </div>
+  </aside>
+
+</div>
+<script src="app.js"></script>
+</body>
+</html>
