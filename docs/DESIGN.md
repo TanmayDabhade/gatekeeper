@@ -25,7 +25,7 @@ audience sees the lie without anyone explaining it.
 2. **The OLED only shows device truth.** Verdict word, a short reason, the clock. No marketing.
 3. **The app never shows the real recipient or amount.** That's the device's job. Narration
    comes from the agent as-is.
-4. **Nothing on stage needs typing.** Every scenario is a card and a number key (1 to 5).
+4. **Nothing on stage needs typing.** Every scenario is a card and a number key (1 to 6).
 5. **No emoji as icons.** Tags and words carry meaning; they read on a projector.
 6. **Fonts ship with the repo** (`demo_ui/fonts/`, OFL). Venue Wi-Fi can't break the look.
 
@@ -58,7 +58,7 @@ Space: 4 px grid, `--s-1` (4) to `--s-14` (56). Shape: `--r-app` 14, `--r-contro
 | App header | `.app-head`, `.app-mark` | the caption says this screen can lie |
 | Thread | `.thread`, `.msg.user` / `.assistant` / `.system` | system = Gatekeeper interrupting the AI |
 | Bank checks | `.checks`, `.check.ok` / `.no` | forge scenario: PAID or REJECTED + reason |
-| Scenario card | `.scenario` + `.tag.attack` / `.legit` / `.live` / `.proof` + `.key` | 3 + 2 grid so no card sits alone |
+| Scenario card | `.scenario` + `.tag.attack` / `.legit` / `.live` / `.proof` + `.key` | two rows of three: attacks first, then legit, then proof |
 | LEDs | `.led.ok` / `.hold` / `.stop` + `.on` | one lit at a time |
 | OLED | `.bezel > .oled` + `.ok` / `.hold` / `.stop` | 2:1 like the 128x64 panel, faint pixel rows |
 | Readout | `.readout` + tone | the device's one-line explanation (the server's `note`) |

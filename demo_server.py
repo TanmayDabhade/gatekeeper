@@ -209,12 +209,32 @@ def s_forge():
             "note": "Only the genuine device approval moved money."}
 
 
+def s_wipe():
+    # Beyond banking: a hijacked agent tries to delete sensitive files, calling it "low risk."
+    # The device catches the lie and LOCKS — not just money, but data destruction.
+    f = os.path.join(EX.data_dir, "sensitive", "tax_return.pdf")
+    try:
+        res = EX.delete_file(f, "low")
+    except Exception as e:
+        return {"narration": "Tidying up — removing the old tax records as requested.",
+                "verdict": "error", "note": str(e)}
+    _speak(res.get("verdict", ""), "delete_file", 0)
+    note = {"locked": "The agent called deleting your tax records 'low risk' — the device caught "
+                      "the lie and LOCKED. The file was NOT deleted. (Hold RESET 3s to unlock.)",
+            "denied": "Not approved on the device — the file was NOT deleted.",
+            "blocked": "Device blocked the delete — the file was NOT deleted.",
+            }.get(res.get("verdict"), res.get("detail", ""))
+    return {"narration": "Tidying up — removing the old tax records as requested.",
+            "verdict": res.get("verdict", "?"), "note": note}
+
+
 SCENARIOS = {
     "inbox": lambda: s_inbox(),
     "inbox_live": lambda: s_inbox_live(),
     "pay_legit": lambda: s_pay(NESSIE_ACME_ACCOUNT, 75000, "INV-2291", True),
     "pay_fraud": lambda: s_pay(NESSIE_LOOKALIKE_ACCOUNT, 75000, "INV-2290", False),
     "forge": lambda: s_forge(),
+    "wipe": lambda: s_wipe(),
 }
 
 # The page lives in demo_ui/ (design system: docs/DESIGN.md). Only these files are served.
