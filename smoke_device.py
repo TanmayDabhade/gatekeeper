@@ -6,7 +6,7 @@
 Needs a FRESH device: restart the mock / press EN on the board (the delete-rate cases
 assume no deletes in the last 10 minutes, and a locked/frozen device answers "locked").
 Bench mode never changes locked/frozen state, so the device is still usable afterwards.
-test_mock_device.py runs the same CASES against the mock in-process.
+tests/test_mock_device.py runs the same CASES against the mock in-process.
 """
 import hashlib
 import os

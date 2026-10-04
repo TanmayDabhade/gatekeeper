@@ -1,6 +1,6 @@
 """M2 unit tests: every executor check, against an in-process fake device.
 
-Run: .venv/bin/python -m pytest -q test_executor.py
+Run: .venv/bin/python -m pytest -q tests/test_executor.py
 No mock, Mailpit or Docker needed.
 """
 import hashlib

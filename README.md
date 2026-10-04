@@ -80,7 +80,8 @@ Demo:
 
 Data and tests:
 - `data/`, `make_data.py` demo inbox and fake PDFs
-- `test_*.py` unit tests (host) and board-only scripts
+- `tests/` unit tests for the host (no hardware, Mailpit, Docker, or keys needed)
+- `hardware/` board-only scripts that talk to a real ESP32 over serial
 
 Documentation:
 - `docs/` IDEA, DECISIONS, TODO, CONTRACT, DEMO, DESIGN
@@ -141,13 +142,12 @@ in device flash; it never leaves the device.
 ## Tests
 
 ```
-.venv/bin/python -m pytest -q test_executor.py test_mock_device.py test_agent.py \
-  test_bench.py test_verifier.py test_nessie.py
+.venv/bin/python -m pytest -q                                             # unit tests in tests/
 GATEKEEPER_PORT=/dev/cu.usbserial-0001 .venv/bin/python smoke_device.py   # against the board
 ```
 
-Note: run the test files by name. A bare `pytest` also collects the board-only scripts, which
-open the serial port on import.
+`pytest.ini` limits a bare `pytest` to `tests/`. The scripts in `hardware/` open the serial port
+on import, so run them directly against a board, never through pytest.
 
 ## Tech stack
 

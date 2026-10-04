@@ -1,6 +1,6 @@
 """M9 tests: the verifier gateway accepts exactly what the device signed, over real SMTP.
 
-Run: .venv/bin/python -m pytest -q test_verifier.py
+Run: .venv/bin/python -m pytest -q tests/test_verifier.py
 No mock server, Mailpit, Docker or key needed (gateway and device run in-process).
 """
 import json

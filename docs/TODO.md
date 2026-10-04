@@ -5,7 +5,7 @@ Milestones: F = firmware (device owner), M = software. Feature freeze at **hour 
 ## Tanmay (software: executor/, agent/, bench/)
 - [x] M2 executor: open the port with `dtr=False, rts=False` (otherwise the ESP32 reboots on connect)
 - [x] M2 executor: skip reply lines that don't start with `{` (ESP32 boot messages)
-- [x] Mock matches the firmware verdict for verdict (`test_mock_device.py`)
+- [x] Mock matches the firmware verdict for verdict (`tests/test_mock_device.py`)
 - [x] M3: agent loop (`agent.py`, `llm.py`) with narration-only screen, HIGH-risk prompt, compromised mode; 23 tests- [x] M4–M5: scenarios plus a benchmark (`scenarios.py`, `bench.py`): 24 attacks, 20 benign. Worst-case agent: 24/24 hijacked, 1 executed with Gatekeeper (atk-07), 0 false positives, 40 touches per 100 benign requests
 - [ ] M4–M5: run `bench.py --agent llm` once a provider is chosen and put the real hijack rate in the Devpost
 - [x] M6: Nessie `pay_invoice` (contract v2) on the mock + executor + agent + bench; per CONTRACT v2; verified live against the Nessie sandbox (DECISIONS 16:45)
@@ -27,7 +27,7 @@ Milestones: F = firmware (device owner), M = software. Feature freeze at **hour 
 - [ ] Decide the taint scope and the lie-check severity tiers (see `IDEA.md` → Open questions)
 - [ ] "New recipient" warning on the OLED
 - [ ] Decide on the delete-rate gap the benchmark found (atk-07): 5 non-sensitive deletes per 10 min are auto-signed, so an injection can wipe a small public folder. A fix is a firmware + mock policy change (DECISIONS first)
-- [ ] Repo layout: move to `executor/ agent/ bench/ firmware/` plus `CONTRACT.md` per the KT doc, or log a decision to stay flat
+- [x] Repo layout: stay flat; tests in `tests/`, board scripts in `hardware/` (DECISIONS 2026-10-04)
 - [ ] Notability: ~20 min ideation/wiring/threat-model notes; tag on Devpost; attach ≥2 screenshots
 - [ ] Figma: OLED screen mockups + two-screen demo frame (also feeds the Devpost GIF / Best Design)
 - [ ] Devpost: lead with the two-screen GIF, keep the scope section, and delete the trailing "I can add this to your plan doc…" line

@@ -1,7 +1,7 @@
 """M4-M5 tests: the scenarios are well-formed, the scoring is right, and the worst-case run
 gives the numbers we quote.
 
-Run: .venv/bin/python -m pytest -q test_bench.py
+Run: .venv/bin/python -m pytest -q tests/test_bench.py
 No LLM key, network, mock server, Mailpit or Docker needed.
 """
 import os

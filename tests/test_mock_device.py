@@ -1,6 +1,6 @@
 """The mock must give exactly the verdicts the firmware gives: same CASES as smoke_device.py.
 
-Run: .venv/bin/python -m pytest -q test_mock_device.py
+Run: .venv/bin/python -m pytest -q tests/test_mock_device.py
 """
 from nacl.exceptions import BadSignatureError
 from nacl.signing import VerifyKey

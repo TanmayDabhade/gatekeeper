@@ -23,9 +23,9 @@ src/main.cpp      ESP32 firmware: validation, policy, signing, OLED, buttons (Pl
 src/voice.cpp     M7: ElevenLabs TTS streamed to a MAX98357A over I2S (BCLK 14, LRC 17, DIN 16); off without include/secrets.h
 include/          secrets.example.h -> copy to secrets.h (gitignored): Wi-Fi + ElevenLabs key + voice id
 lib/monocypher/   Ed25519 for the firmware
-test_device.py    board-only: ping and a request (device owner)
-test_sign.py      board-only: signature and tamper check, needs a button press
-test_policy.py    board-only: every policy case with button prompts
+hardware/         board-only scripts (open the serial port at import): test_device.py (ping + a request),
+                  test_sign.py (signature + tamper, needs a button press), test_policy.py (every policy case
+                  with button prompts), hw_test.py (interactive walkthrough)
 protocol.py       wire contract v2 (docs/CONTRACT.md): signed string, verdicts, body_hash. Firmware must match byte for byte
 executor.py       host side: device link, key pinning, checks, email/delete/sandbox
 mock_device.py    fake device: policy, signing, OLED render, keyboard approve/deny
@@ -35,24 +35,31 @@ agent.py          M3: LLM agent loop (tools -> executor), narration-only "lying 
 llm.py            M3: stdlib OpenAI-style chat client, plus ScriptedLLM (compromised mode and tests)
 scenarios.py      M4: 24 injection attacks + 20 benign requests (inbox, task, harmful/wanted action)
 nessie.py         M6: Nessie client (withdrawal + deposit per payment) and ledger balances; `setup` makes demo accounts
-test_nessie.py    M6: Nessie client against a fake API
 demo_ui/          demo dashboard UI (tokens.css, components.css, app.js, bundled fonts), served by demo_server.py; design system in docs/DESIGN.md
 verifier.py       M9: separate mail gateway (:1026) that re-checks the device signature before relaying to Mailpit
 bank.py           M9: separate "bank" process (:8099) that holds the Nessie key and pays only on a verified device signature
 demo_forge.py     M9: legit / forged / tampered / replayed payment vs the bank, with Nessie balances as proof (--offline)
 forge.py          M9: compromised-laptop demo: 7 forgeries + replay vs the gateway (--offline needs nothing)
+demo_server.py    demo dashboard on :8800 (demo.sh starts it with the bank; keys in .demo.env)
+demo_baseline.py  "Gatekeeper off" baseline: a hijacked agent pays a lookalike vendor
+demo_hijack.sh    live-LLM hijack clip (OpenRouter) blocked by the device
+mailpit_inbox.py  plants a phishing invoice in Mailpit and pulls it into data/inbox_live.json
+voice_host.py     host-side ElevenLabs fallback that speaks the device's verdict on the laptop
 bench.py          M4-M5: runs every scenario through agent+executor+device (bench mode), prints the metrics
 smoke_device.py   30 contract and policy cases (bench, no buttons) against the mock OR the board
-test_executor.py  M2: unit tests against an in-process fake device
-test_mock_device.py  runs smoke_device's cases against the mock in-process (mock == firmware)
-test_agent.py     M3: LLM client and agent loop against the real mock policy in-process
-test_verifier.py  M9: gateway checks over real SMTP, executor mail passes, every forgery rejected
-test_bench.py     M4-M5: scenario sanity, scoring, and the worst-case numbers we quote
+tests/            unit tests (conftest.py puts the repo root on sys.path; pytest.ini makes `pytest` run only these):
+  test_executor.py     M2: unit tests against an in-process fake device
+  test_mock_device.py  runs smoke_device's cases against the mock in-process (mock == firmware)
+  test_agent.py        M3: LLM client and agent loop against the real mock policy in-process
+  test_verifier.py     M9: gateway checks over real SMTP, executor mail passes, every forgery rejected
+  test_bench.py        M4-M5: scenario sanity, scoring, and the worst-case numbers we quote
+  test_nessie.py       M6: Nessie client against a fake API
 make_data.py      generates the fake PDFs in data/
 data/             inbox.json (includes a phishing email), public/ and sensitive/ PDFs
-docs/             shared context: IDEA, DECISIONS, TODO, SYNC_PROMPT
+docs/             shared context: IDEA, CONTRACT, DECISIONS, TODO, DEMO, DESIGN, SYNC_PROMPT
+reports/          benchmark and hardware test reports
 ```
-The KT doc plans `firmware/ executor/ agent/ bench/` plus `CONTRACT.md`, but everything, including the firmware, is at the repo root. Don't restructure until there's a DECISIONS entry (open item in TODO). `docs/CONTRACT.md` is the contract; `protocol.py` implements it.
+The KT doc planned `firmware/ executor/ agent/ bench/`. We kept the Python modules and the PlatformIO firmware at the repo root and only moved tests into `tests/` and board scripts into `hardware/` (DECISIONS 2026-10-04). Further moves need a new DECISIONS entry. `docs/CONTRACT.md` is the contract; `protocol.py` implements it.
 
 ## Conventions
 - **Ownership:** software touches only executor, agent and bench code, never `firmware/`. Nothing new after hour 19.
@@ -63,7 +70,7 @@ The KT doc plans `firmware/ executor/ agent/ bench/` plus `CONTRACT.md`, but eve
 - Device policy lives on the device, never in `config.py`.
 - The caller never sets taint; only `read_inbox` does.
 - Short module docstrings that say what the file does and how to run it. Comments explain *why*.
-- Every executor check gets a test in `test_executor.py`.
+- Every executor check gets a test in `tests/test_executor.py`.
 
 ## Run locally
 ```bash
@@ -74,7 +81,7 @@ python -m venv .venv && .venv/bin/pip install -r requirements.txt
 .venv/bin/python gk.py send --to boss@ourcompany.com --file data/public/q3_summary.pdf --claim low
 GATEKEEPER_COMPROMISED=1 .venv/bin/python agent.py   # scripted hijacked agent, no key (demo backup)
 .venv/bin/python agent.py "Handle my inbox"          # real LLM (LLM_BASE_URL, LLM_MODEL, LLM_API_KEY); --show-calls to debug
-.venv/bin/python -m pytest -q test_executor.py test_mock_device.py test_agent.py test_bench.py test_verifier.py test_nessie.py   # unit tests (no mock/Mailpit/Docker/key needed)
+.venv/bin/python -m pytest -q                    # unit tests in tests/ (no mock/Mailpit/Docker/key needed)
 .venv/bin/python smoke_device.py                 # 30 cases against a fresh mock
 NESSIE_API_KEY=... .venv/bin/python bank.py         # M9 bank: the only process with the Nessie key
 .venv/bin/python gk.py pay --to 7083a93b-e422-4fa6-8188-330034f0c237 --amt 25000 --memo INV-2290   # M6, paid via the bank
@@ -91,7 +98,7 @@ GATEKEEPER_PORT=/dev/cu.usbserial-0001 .venv/bin/python smoke_device.py   # same
 ```
 Mailpit: `docker run -d --name mailpit -p 8025:8025 -p 1025:1025 axllent/mailpit`. Sandbox: `docker pull python:3.12-slim`.
 
-Name the test files explicitly. A bare `pytest` also collects the `test_*.py` board scripts, which open the serial port at import.
+`pytest.ini` limits a bare `pytest` to `tests/`. Never point pytest at `hardware/`: those board scripts open the serial port at import.
 
 **Real device:** `GATEKEEPER_PORT=/dev/cu.usbserial-0001` (CP2102). Close every serial monitor first, because only one program can hold the port. The main board's pubkey is `4f3339776edac5164f1ba346b3dd105b0648caaf8f6c32d91e546860d1d4cfb6`. The spare board has a different key, and `pio run -t erase` rotates it, so re-run `gk.py pin --force` after either.
 
