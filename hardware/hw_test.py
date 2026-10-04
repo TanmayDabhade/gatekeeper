@@ -6,7 +6,7 @@ signature check, so you can validate the firmware end to end on a real board:
 the OLED screens, the RGB LED, the buttons, and on-device Ed25519 signing.
 
 Usage:
-    python tools/hw_test.py [PORT]
+    python hardware/hw_test.py [PORT]
 Port resolution: argv[1], else $GATEKEEPER_PORT, else /dev/cu.usbserial-0001.
 Close any serial monitor first -- only one process can hold the port.
 
