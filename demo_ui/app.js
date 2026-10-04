@@ -254,11 +254,19 @@
     setLeds("hold");
     setReadout("If the device asks: hold the button. Over $500, then tap the card.", "hold");
 
+    // A deliberate "checking" beat so the verdict doesn't snap in instantly (reads as the device
+    // actually deciding, and gives the eye time to move to it). DeepSeek is already slow, so skip it.
+    var started = Date.now();
+    var minMs = activeId === "inbox_live" ? 0 : 1500;
+
     fetch("/api/run", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body)
     }).then(function (r) { return r.json(); }).then(function (r) {
+      var wait = Math.max(0, minMs - (Date.now() - started));
+      return new Promise(function (res) { setTimeout(function () { res(r); }, wait); });
+    }).then(function (r) {
       dots.remove();
       renderNarration(r);
       var v = VERDICTS[r.verdict] || { word: String(r.verdict || "?").toUpperCase(), tone: "", sub: "" };
