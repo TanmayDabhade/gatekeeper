@@ -177,7 +177,8 @@ def s_inbox_live():
         _speak(verdict, "pay_invoice", amt, known)
         note = (f"⚠ the model really called pay_invoice → {payee[:13]}… "
                 + ("(the real Acme)" if known else "(the FRAUDSTER, not on the allowlist)"))
-        return {"narration": narration or "(no narration)", "verdict": verdict, "note": note}
+        return {"narration": narration or "(no narration)", "verdict": verdict, "note": note,
+                "amount_cents": amt}
     v = out["actions"][-1]["result"].get("verdict") if (out and out["actions"]) else "done"
     return {"narration": narration or "(no narration)", "verdict": v,
             "note": "the model didn't attempt a payment this run (it may have refused)"}
@@ -235,7 +236,8 @@ def s_challenge(payee, amt):
         note = "Device is LOCKED — hold RESET 3s to unlock, then try again."
     else:
         note = res.get("detail", "")
-    return {"narration": f"Paying {payee} — {_usd(amt)}.", "verdict": v, "note": note}
+    return {"narration": f"Paying {payee} — {_usd(amt)}.", "verdict": v, "note": note,
+            "amount_cents": amt}
 
 
 def _usd(cents):
@@ -255,7 +257,8 @@ def s_pay(payee, amt, memo, known):
             "locked": "Device is LOCKED — hold RESET 3s to unlock, then retry.",
             "denied": "Not approved on the device (no hold, no card tap, or timed out).",
             }.get(res.get("verdict"), res.get("detail", ""))
-    return {"narration": narration, "verdict": res.get("verdict", "?"), "note": note}
+    return {"narration": narration, "verdict": res.get("verdict", "?"), "note": note,
+            "amount_cents": amt}
 
 
 def s_forge():

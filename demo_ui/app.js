@@ -211,6 +211,13 @@
     });
   }
 
+  var fraudBlocked = 0;
+  function tallyFraud(cents) {
+    fraudBlocked += cents;
+    $("fraud-stat").hidden = false;
+    $("fraud-amt").textContent = money(fraudBlocked);
+  }
+
   function setPill(id, up) {
     var p = $(id);
     p.classList.toggle("up", up === true);
@@ -286,6 +293,7 @@
       setOled(v.word, v.sub, v.tone, false);
       setLeds(v.tone);
       setReadout(r.note || v.sub, v.tone);
+      if (r.verdict === "blocked" && r.amount_cents) tallyFraud(r.amount_cents);  // $ kept from fraudsters
     }).catch(function (e) {
       dots.remove();
       message("system", null, "The dashboard lost the server: " + e.message);

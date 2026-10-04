@@ -254,3 +254,11 @@ body {
   border: 1px solid var(--app-line); border-radius: var(--r-control); padding: var(--s-3);
 }
 .challenge-lost:hover { border-color: var(--app-brand); background: var(--app-brand-soft); }
+/* ------------------------------------------------ Fraud-blocked session stat */
+.fraud-stat {
+  display: flex; align-items: baseline; justify-content: space-between;
+  padding: 14px 16px; margin-bottom: 16px; border-radius: 10px;
+  background: rgba(255,77,79,0.12); border: 1px solid rgba(255,77,79,0.35);
+  color: #ffd7d8; font-size: 13px; letter-spacing: 0.04em; text-transform: uppercase;
+}
+.fraud-stat b { font-size: 26px; color: #ff6164; font-variant-numeric: tabular-nums; letter-spacing: 0; }
