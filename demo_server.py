@@ -100,21 +100,27 @@ def balances(force=False):
     return _BAL["v"]
 
 
-def _speak(verdict, act="", amt=0, known=True):
+def _bg(fn, *a):
+    """Run voice in the background so the dashboard shows the result immediately instead of
+    waiting for ElevenLabs + afplay to finish speaking."""
     if voice_host and os.environ.get("GATEKEEPER_VOICE"):
-        try:
-            voice_host.speak_result({"pay_invoice": "pay"}.get(act, act), "", amt,
-                                    {"verdict": verdict}, payee_known=known)
-        except Exception:
-            pass
+        threading.Thread(target=lambda: _safe(fn, *a), daemon=True).start()
+
+
+def _safe(fn, *a):
+    try:
+        fn(*a)
+    except Exception:
+        pass
+
+
+def _speak(verdict, act="", amt=0, known=True):
+    _bg(voice_host.speak_result, {"pay_invoice": "pay"}.get(act, act), "", amt,
+        {"verdict": verdict}, known) if voice_host else None
 
 
 def _say(text):
-    if voice_host and os.environ.get("GATEKEEPER_VOICE"):
-        try:
-            voice_host.say(text)
-        except Exception:
-            pass
+    _bg(voice_host.say, text) if voice_host else None
 
 
 # ---- scenarios (each returns narration, verdict, note) ----
