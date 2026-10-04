@@ -1,156 +1,94 @@
 # Gatekeeper
 
-A hardware approval device for AI agents: the one screen your AI cannot lie to.
+**The only screen your AI can't lie to.** Gatekeeper is a hardware wallet for AI agent actions.
 
-AI agents are starting to take consequential actions, such as sending email, deleting files,
-and moving money. An agent that reads untrusted content can be hijacked by instructions hidden
-in it, and today's confirmations appear on the same screen the software controls. A hijacked
-agent can describe a dangerous action as harmless, and the human approves something they never
-actually saw.
+An AI assistant that reads untrusted content (email, invoices) can be steered by instructions hidden
+in it. Today's confirmations appear on the same screen the software controls, so a hijacked agent can
+describe a dangerous action as harmless and the human approves something they never saw.
 
-Gatekeeper puts the real action on a separate ESP32 device with its own screen. The agent can
-only ask; nothing consequential happens until the device shows the true recipient, file, or
-amount and signs it with an Ed25519 key the host never holds. For payments, a separate bank
-process verifies that signature before any money moves, so even a fully compromised host cannot
-forge an approval.
+Gatekeeper moves the decision onto an ESP32 with its own OLED, buttons and RFID reader. The agent can
+only *ask*. Every risky action (send an email, delete a file, pay an invoice) goes to the device, which
+applies its own policy, shows the real recipient, file and amount, and signs `allow`/`approved` verdicts
+with Ed25519. The executor, the mail gateway and the bank act only on a valid signature from the pinned
+device key.
 
 ## How it works
 
 ```
-  AI agent            Host executor            Gatekeeper device         Bank / verifier
- (untrusted)        (holds no keys)            (ESP32, trusted)          (separate process)
-     |                     |                          |                         |
-     |  tool call          |   request (JSON)         |                         |
-     |-------------------->|------------------------->|  show real action       |
-     |                     |                          |  on the OLED,           |
-     |                     |                          |  human approves,        |
-     |                     |   signed verdict         |  sign (Ed25519)         |
-     |                     |<-------------------------|                         |
-     |                     |   pay(request, approval) |                         |
-     |                     |----------------------------------------------------|
-     |                     |                          |   verify signature,     |
-     |                     |                          |   then move money        |
+ untrusted inbox ──► LLM agent ──tool call──► executor ──request──► ESP32 Gatekeeper
+                    (no credentials)          (holds creds)         policy + OLED + buttons
+                                                   ▲                 Ed25519 signature
+                                                   └──── signed verdict ◄──┘
+                                                   │
+                       mail gateway (verifier.py) ◄┤ re-checks the device signature
+                       bank (bank.py, Nessie)     ◄┘ re-checks the device signature
 ```
 
-Trust model: the host and the agent are assumed to be compromisable and may lie about an action.
-They never hold the device key or the bank key. The device applies its own policy, shows the
-truth, and signs only `allow` and `approved` verdicts. The bank re-verifies the signature before
-paying, so a forged, tampered, or replayed approval is rejected by the bank, not the software.
+- **Device policy:** contacts list, `/data/sensitive/` is blocked, delete rate limit, payee list,
+  and an RFID co-sign for payments over $500.
+- **Trusted display:** the OLED shows the action, the registrable domain
+  (`boss@company.com.evil.io` shows as `evil.io`), the file, the amount and the agent's claim.
+- **Lie check:** if the agent calls an action `low` risk and the device disagrees, the session locks.
+- **Taint:** reading outside mail tightens every rule for the rest of the session.
+- **Separate verifiers:** even a fully compromised laptop can't forge mail or move money, because the
+  gateway and the bank check the device's signature themselves.
+- **Voice:** the device speaks the true action aloud through ElevenLabs.
 
-## Repository structure
-
-The project is intentionally flat: the host modules import each other directly and run as
-scripts. Files are grouped by role below.
-
-Firmware (the device, PlatformIO):
-- `src/main.cpp` validation, policy, OLED, buttons, RFID co-sign, Ed25519 signing
-- `lib/monocypher/` Ed25519 implementation for the firmware
-- `include/`, `platformio.ini` build configuration
-
-Wire contract:
-- `protocol.py` the signed-message format and verdicts, shared by firmware, mock, and host
-- `docs/CONTRACT.md` the frozen v2 contract specification
-
-Host (assumed compromisable; holds no keys):
-- `executor.py` device link, key pinning, signature checks, email/delete/sandbox actions
-- `config.py` host configuration
-- `gk.py` command-line interface for sending test requests
-- `mock_device.py` software stand-in for the device, byte-identical verdicts
-
-Agent:
-- `agent.py` the LLM agent loop and the narration-only "lying screen"
-- `llm.py` a stdlib OpenAI-style chat client, plus a scripted client for the compromised mode
-
-Payments:
-- `nessie.py` Capital One Nessie client (accounts, transfers, merchants, purchases)
-- `bank.py` separate process that verifies the device signature before paying
-- `verifier.py` signature, nonce, and expiry verification
-
-Benchmark:
-- `bench.py`, `scenarios.py` the attack and benign scenarios and scoring
-- `smoke_device.py` contract and policy check against the mock or the real board
-
-Demo:
-- `demo.sh` one-command launcher (reads keys from `.demo.env`)
-- `demo_server.py`, `demo_ui/` the click-driven dashboard
-- `demo_hijack.sh` live weak-model hijack clip
-- `demo_forge.py`, `demo_baseline.py` the forged-request and baseline-failure demos
-- `voice_host.py` host-side ElevenLabs voice on the laptop speaker
-- `mailpit_inbox.py` live email ingestion helper
-
-Data and tests:
-- `data/`, `make_data.py` demo inbox and fake PDFs
-- `test_*.py` unit tests (host) and board-only scripts
-
-Documentation:
-- `docs/` IDEA, DECISIONS, TODO, CONTRACT, DEMO, DESIGN
-- `reports/` hardware test report and benchmark results
-
-## Quickstart
-
-Host setup:
-
-```
-python -m venv .venv && .venv/bin/pip install -r requirements.txt
-.venv/bin/python make_data.py
-```
-
-Firmware (device owner):
-
-```
-.venv/bin/pip install platformio
-.venv/bin/pio run -t upload
-```
-
-Run the demo (see `docs/DEMO.md` for the full runbook):
-
-```
-cp .demo.env.example .demo.env   # add your keys
-./demo.sh                         # starts the bank and dashboard, opens http://localhost:8800
-```
-
-## Demo scenarios
-
-- Hijacked agent: a phishing email makes the agent try to exfiltrate a sensitive file. The device
-  locks the session; nothing is sent.
-- Invoice fraud: the agent is told to pay a lookalike vendor. The device blocks it; the ledger
-  does not move and the payment never enters the purchase record.
-- Legitimate payment: a real vendor is paid, but only after a button hold and an RFID card tap.
-- Live model: a current model (DeepSeek) reads the same fraud invoice, falls for it, and the
-  device blocks it anyway.
-- Forged approval: a compromised host forges, edits, and replays approvals; the bank rejects all
-  but the genuine one.
-- Beat the Gatekeeper: type any account and try to pay it; the device refuses any unregistered
-  payee.
+The wire contract is in [`docs/CONTRACT.md`](docs/CONTRACT.md) and implemented in `protocol.py`.
 
 ## Results
 
-Measured on the real ESP32 (`esp32dev`). See `docs/RESULTS.md`.
+`bench.py` runs 27 prompt-injection attacks and 22 benign tasks through the real agent loop, executor
+and device policy, using a worst-case agent that obeys every injection:
 
-- 24 of 24 attacks caught, 0 executed, 0 false positives.
-- Device decision latency approximately 42 ms median.
-- Model probe against the fraud invoice: Grok 4 resisted; DeepSeek, Ministral-8B, and Llama 3.3
-  fell for it. In every case the device was the backstop.
+| | Without Gatekeeper | With Gatekeeper |
+|---|---|---|
+| Harmful actions executed | 27 / 27 | **0 / 27** |
+| Benign false positives | n/a | **0 / 22** |
 
-## Hardware
+Of the 27 attacks, 12 were blocked, 10 locked the session, and 5 were held for a human, who sees the
+real action on the device.
 
-ESP32 (`esp32dev`), SSD1306 OLED (I2C), three buttons (approve, kill, reset), an RGB LED, and an
-MFRC522 RFID reader for payment co-signs. The signing key is generated on first boot and stored
-in device flash; it never leaves the device.
-
-## Tests
+## Repo layout
 
 ```
-.venv/bin/python -m pytest -q test_executor.py test_mock_device.py test_agent.py \
-  test_bench.py test_verifier.py test_nessie.py
-GATEKEEPER_PORT=/dev/cu.usbserial-0001 .venv/bin/python smoke_device.py   # against the board
+src/ include/ lib/   ESP32 firmware (PlatformIO, platformio.ini): policy, signing, OLED, buttons, voice
+protocol.py          wire contract v2, byte for byte with the firmware
+executor.py          host side: device link, key pinning, checks, email / delete / sandbox / pay
+agent.py, llm.py     the untrusted LLM agent (any OpenAI-style endpoint) and a scripted hijacked agent
+mock_device.py       software stand-in for the board (same verdicts as the firmware)
+verifier.py          separate mail gateway that re-checks the device signature
+bank.py, nessie.py   separate bank process: pays through Capital One Nessie only on a valid signature
+scenarios.py         injection attacks and benign tasks; bench.py scores them
+gk.py                CLI for sending requests by hand
+demo_server.py       demo dashboard (UI in demo_ui/), started by demo.sh
+forge.py, demo_*.py  forged / tampered / replayed request demos and the "Gatekeeper off" baseline
+tests/               unit tests (no hardware, Mailpit, Docker or keys needed)
+hardware/            board-only scripts that talk to a real ESP32 over serial
+data/                fake inbox and fake public / sensitive files
+docs/                idea, contract, decisions, demo runbook, design system
+reports/             benchmark and hardware test reports
 ```
 
-Note: run the test files by name. A bare `pytest` also collects the board-only scripts, which
-open the serial port on import.
+## Run it
 
-## Tech stack
+```bash
+python -m venv .venv && .venv/bin/pip install -r requirements.txt
+.venv/bin/python make_data.py                      # fake PDFs
+.venv/bin/python -m pytest -q                      # unit tests
 
-Python 3 (stdlib-first), PyNaCl and Monocypher for Ed25519, pyserial for the device link,
-PlatformIO and Arduino for the firmware, Capital One Nessie for payments, ElevenLabs for voice,
-and an OpenAI-style LLM endpoint for the agent.
+.venv/bin/python mock_device.py                    # terminal 1: mock device (a/d/r/k/s/q)
+.venv/bin/python gk.py pin                         # terminal 2: pin the device key
+GATEKEEPER_COMPROMISED=1 .venv/bin/python agent.py # a hijacked agent tries to exfiltrate a tax return
+.venv/bin/python bench.py                          # benchmark
+.venv/bin/python forge.py --offline                # every forged email is rejected by the gateway
+.venv/bin/python demo_forge.py --offline           # only the genuine approval moves money
+```
+
+With the real board, set `GATEKEEPER_PORT=/dev/cu.usbserial-0001`. Firmware: `pio run -t upload`.
+The full demo runbook is in [`docs/DEMO.md`](docs/DEMO.md).
+
+## Built with
+
+ESP32, SSD1306 OLED, MFRC522 RFID, MAX98357A amp, Monocypher (Ed25519), Python (PyNaCl, pyserial),
+Mailpit, Docker, Capital One Nessie, ElevenLabs.

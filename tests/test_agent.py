@@ -1,6 +1,6 @@
 """M3 tests: the LLM client, and the agent loop against the real mock policy in-process.
 
-Run: .venv/bin/python -m pytest -q test_agent.py
+Run: .venv/bin/python -m pytest -q tests/test_agent.py
 No LLM key, network, mock server, Mailpit or Docker needed.
 """
 import io

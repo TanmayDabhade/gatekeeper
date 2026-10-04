@@ -1,6 +1,6 @@
 """M6 tests: the Nessie client builds the right requests and the ledger balance is exact.
 
-Run: .venv/bin/python -m pytest -q test_nessie.py
+Run: .venv/bin/python -m pytest -q tests/test_nessie.py
 No network or Nessie key needed (a fake opener stands in for the API).
 """
 import io
