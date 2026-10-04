@@ -188,11 +188,16 @@ def s_challenge(payee, amt):
     v = res.get("verdict", "?")
     known = payee == NESSIE_ACME_ACCOUNT
     _speak(v, "pay_invoice", amt, known)
-    if v in ("blocked", "denied"):
+    if v == "blocked":
         note = (f"“{payee[:22]}” is not a registered payee — the device refused to sign. The "
                 "allowlist lives in the device firmware, where the laptop can't change it.")
-    elif v in ("approved", "hold"):
-        note = "That IS the one registered payee — and it still needs the physical button + card."
+    elif v == "approved":
+        note = "Registered payee, approved with the physical card — only way money moves."
+    elif v == "denied":
+        note = ("That IS the registered payee — but it still needs the physical card, so without a "
+                "tap nothing moved. Even a valid account can't move money from the keyboard."
+                if known else
+                f"“{payee[:22]}” was refused by the device — nothing moved.")
     elif v == "locked":
         note = "Device is LOCKED — hold RESET 3s to unlock, then try again."
     else:
