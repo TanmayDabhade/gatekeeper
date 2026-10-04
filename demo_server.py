@@ -168,6 +168,24 @@ def s_inbox_live():
             "note": "the model didn't attempt a payment this run (it may have refused)"}
 
 
+def s_revoke():
+    # Lost a card: the owner taps the credential they still hold; it becomes the only valid card,
+    # so a found/stolen card stops working. The device requires the tap to be an already-valid card.
+    try:
+        res = LINK.call({"t": "revoke"})
+    except Exception as e:
+        return {"narration": "Reporting a lost card.", "verdict": "error", "note": str(e)}
+    if res.get("ok"):
+        kept = res.get("kept", "")
+        return {"narration": "Reporting a lost card — tapped the credential I still have.",
+                "verdict": "approved",
+                "note": f"Done. Only {kept} works now; the lost card is revoked. If someone finds "
+                        "it, it's useless. (Restart the demo to restore both cards.)"}
+    return {"narration": "Reporting a lost card.", "verdict": "denied",
+            "note": "Revoke " + ("refused — " if res.get("reason") != "no tap" else "")
+                    + res.get("reason", "no tap") + "."}
+
+
 def s_challenge(payee, amt):
     # "Beat the Gatekeeper": a judge types any account. It goes through the SAME pay path as a
     # real payment -- no special-casing. The device refuses because it isn't a registered payee,
@@ -282,6 +300,7 @@ SCENARIOS = {
     "pay_fraud": lambda: s_pay(NESSIE_LOOKALIKE_ACCOUNT, 75000, "INV-2290", False),
     "forge": lambda: s_forge(),
     "wipe": lambda: s_wipe(),
+    "revoke": lambda: s_revoke(),
 }
 
 # The page lives in demo_ui/ (design system: docs/DESIGN.md). Only these files are served.

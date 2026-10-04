@@ -280,6 +280,9 @@
   buildDock();
   $("ch-go").addEventListener("click", runChallenge);
   $("ch-acct").addEventListener("keydown", function (e) { if (e.key === "Enter") runChallenge(); });
+  $("ch-lost").addEventListener("click", function () {
+    runRequest("revoke", "I lost one of my cards — revoke it.", { scenario: "revoke" });
+  });
   tick();
   setInterval(tick, 15000);
   refresh();

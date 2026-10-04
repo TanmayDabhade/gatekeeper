@@ -25,6 +25,33 @@ const EnrolledCard ENROLLED_CARDS[] = {
     {{0xF6, 0xA0, 0x25, 0xF6}, 4},    // backup (fob)
 };
 const int NUM_ENROLLED = sizeof(ENROLLED_CARDS) / sizeof(ENROLLED_CARDS[0]);
+
+// The *active* set starts as all enrolled cards. "Lost a card?" revokes down to the one card the
+// owner still holds (tapped to prove possession). RAM only: a reboot restores all enrolled cards,
+// so a demo can't lock anyone out. In production this would persist to secure storage.
+EnrolledCard activeCards[8];
+int numActive = 0;
+void initActiveCards()
+{
+  numActive = NUM_ENROLLED;
+  for (int i = 0; i < NUM_ENROLLED; i++)
+    activeCards[i] = ENROLLED_CARDS[i];
+}
+bool isActiveCard(const uint8_t *uid, uint8_t len)
+{
+  for (int c = 0; c < numActive; c++)
+  {
+    if (activeCards[c].len != len)
+      continue;
+    bool same = true;
+    for (uint8_t i = 0; i < len; i++)
+      if (activeCards[c].uid[i] != uid[i])
+        same = false;
+    if (same)
+      return true;
+  }
+  return false;
+}
 int waitForCardTap(unsigned long timeoutMs); // defined below; used by the payment co-sign
 
 // ---------- pins ----------
@@ -721,16 +748,7 @@ int waitForCardTap(unsigned long timeoutMs)
   {
     if (rfid.PICC_IsNewCardPresent() && rfid.PICC_ReadCardSerial())
     {
-      bool match = false;
-      for (int c = 0; c < NUM_ENROLLED && !match; c++)
-      {
-        if (rfid.uid.size != ENROLLED_CARDS[c].len)
-          continue;
-        match = true;
-        for (byte i = 0; i < rfid.uid.size; i++)
-          if (rfid.uid.uidByte[i] != ENROLLED_CARDS[c].uid[i])
-            match = false;
-      }
+      bool match = isActiveCard(rfid.uid.uidByte, rfid.uid.size);
       rfid.PICC_HaltA();
       return match ? 1 : -1;
     }
@@ -779,6 +797,54 @@ void handleLine(const String &line)
     res["uid"] = (r == 0) ? "none" : uidHex();
     serializeJson(res, Serial);
     Serial.println();
+    showHome();
+  }
+  else if (strcmp(t, "revoke") == 0)
+  {
+    // Lost a card: tap the credential you still hold within 15s. It must already be active
+    // (so a found card can't take over); it then becomes the ONLY card, revoking the rest.
+    drawResult("LOST CARD", "Tap card to KEEP");
+    setLed(true, true, false);
+    JsonDocument res;
+    res["t"] = "revoke";
+    unsigned long start = millis();
+    bool done = false;
+    while (!done && millis() - start < 15000)
+    {
+      if (rfid.PICC_IsNewCardPresent() && rfid.PICC_ReadCardSerial())
+      {
+        bool ok = isActiveCard(rfid.uid.uidByte, rfid.uid.size);
+        String uid = uidHex();
+        rfid.PICC_HaltA();
+        if (ok)
+        {
+          activeCards[0].len = rfid.uid.size; // keep only this card
+          for (uint8_t i = 0; i < rfid.uid.size; i++)
+            activeCards[0].uid[i] = rfid.uid.uidByte[i];
+          numActive = 1;
+          res["ok"] = true;
+          res["kept"] = uid;
+          drawResult("DONE", "Other cards revoked");
+        }
+        else
+        {
+          res["ok"] = false;
+          res["reason"] = "that card isn't enrolled; tap a card you already use";
+          drawResult("REFUSED", "Tap a valid card");
+        }
+        done = true;
+      }
+      delay(20);
+    }
+    if (!done)
+    {
+      res["ok"] = false;
+      res["reason"] = "no tap";
+      drawResult("TIMEOUT", "No card tapped");
+    }
+    serializeJson(res, Serial);
+    Serial.println();
+    delay(1200);
     showHome();
   }
   else
@@ -837,6 +903,7 @@ void setup()
 
   SPI.begin(18, 19, 23, 5); // SCK, MISO, MOSI, SS
   rfid.PCD_Init();
+  initActiveCards();
 
   loadOrCreateKey();
   voiceBegin(); // M7: no-op without include/secrets.h

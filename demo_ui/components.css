@@ -248,3 +248,9 @@ body {
   background: var(--stop-ink); border: 0; border-radius: var(--r-control); padding: 0 var(--s-4);
 }
 .challenge-go:hover { filter: brightness(1.08); }
+.challenge-lost {
+  font: inherit; font-weight: 600; cursor: pointer; width: 100%;
+  color: var(--app-ink); background: var(--app-surface);
+  border: 1px solid var(--app-line); border-radius: var(--r-control); padding: var(--s-3);
+}
+.challenge-lost:hover { border-color: var(--app-brand); background: var(--app-brand-soft); }
