@@ -36,6 +36,7 @@ llm.py            M3: stdlib OpenAI-style chat client, plus ScriptedLLM (comprom
 scenarios.py      M4: 24 injection attacks + 20 benign requests (inbox, task, harmful/wanted action)
 nessie.py         M6: Nessie client (withdrawal + deposit per payment) and ledger balances; `setup` makes demo accounts
 test_nessie.py    M6: Nessie client against a fake API
+demo_ui/          demo dashboard UI (tokens.css, components.css, app.js, bundled fonts), served by demo_server.py; design system in docs/DESIGN.md
 verifier.py       M9: separate mail gateway (:1026) that re-checks the device signature before relaying to Mailpit
 bank.py           M9: separate "bank" process (:8099) that holds the Nessie key and pays only on a verified device signature
 demo_forge.py     M9: legit / forged / tampered / replayed payment vs the bank, with Nessie balances as proof (--offline)

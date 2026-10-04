@@ -1,0 +1,78 @@
+/* Gatekeeper design tokens. See docs/DESIGN.md for how to use them.
+ *
+ * Two surfaces tell the demo's story:
+ *   app-*     the AI assistant: friendly, soft, corporate. The screen the attacker can steer.
+ *   device-*  the Gatekeeper box: black enclosure, OLED pixels, LEDs. The screen that can't lie.
+ * Verdict colors are semantic and only ever mean what the device decided.
+ */
+:root {
+  /* ---- app surface (light, deliberately ordinary) ---- */
+  --app-bg: #eceff3;
+  --app-surface: #ffffff;
+  --app-sunken: #f5f7f9;
+  --app-ink: #141a22;
+  --app-ink-muted: #5b6573;
+  --app-line: #d9dee5;
+  --app-brand: #1f4e79;          /* "Acme Corp" blue: bland on purpose */
+  --app-brand-soft: #e3ecf5;
+
+  /* ---- device surface (always dark, like the enclosure) ---- */
+  --device-bg: #0b0d0e;
+  --device-panel: #131618;
+  --device-line: #262b2f;
+  --device-ink: #dbe3e7;
+  --device-ink-muted: #7f8b92;
+  --oled-bg: #000000;
+  --oled-ink: #e9f6ff;           /* SSD1306 pixels: white with a cold cast */
+  --oled-glow: rgba(173, 222, 255, 0.35);
+
+  /* ---- verdicts (LED colors on the device, darker inks on the app) ---- */
+  --ok: #2fd27a;      --ok-ink: #11804a;      --ok-wash: #e2f6ea;
+  --hold: #ffb020;    --hold-ink: #9a5b00;    --hold-wash: #fff3dc;
+  --stop: #ff4d4f;    --stop-ink: #b4232a;    --stop-wash: #fde6e6;
+  --info: #6cb6ff;
+
+  /* ---- type ---- */
+  --font-ui: "Hanken Grotesk", "Helvetica Neue", Arial, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --font-pixel: "VT323", "IBM Plex Mono", ui-monospace, monospace;   /* OLED only */
+
+  --text-xs: 12px;    /* labels, keycaps */
+  --text-sm: 13px;    /* captions, meta */
+  --text-md: 15px;    /* UI text */
+  --text-lg: 17px;    /* chat messages */
+  --text-xl: 20px;    /* section titles */
+  --text-2xl: 26px;   /* app title */
+  --text-oled: 64px;  /* verdict word on the OLED */
+
+  --leading-tight: 1.15;
+  --leading-body: 1.5;
+  --tracking-label: 0.08em;
+
+  /* ---- space (4px grid) ---- */
+  --s-1: 4px; --s-2: 8px; --s-3: 12px; --s-4: 16px; --s-5: 20px;
+  --s-6: 24px; --s-8: 32px; --s-10: 40px; --s-14: 56px;
+
+  /* ---- shape ---- */
+  --r-app: 14px;      /* app cards */
+  --r-control: 10px;  /* app buttons */
+  --r-pill: 999px;
+  --r-device: 3px;    /* the device is machined, not rounded */
+
+  --shadow-app: 0 1px 2px rgba(20, 26, 34, 0.06), 0 10px 28px rgba(20, 26, 34, 0.07);
+  --shadow-app-hover: 0 2px 4px rgba(20, 26, 34, 0.08), 0 14px 34px rgba(20, 26, 34, 0.10);
+
+  /* ---- motion ---- */
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --t-fast: 140ms;
+  --t-med: 240ms;
+
+  /* ---- layout ---- */
+  --device-width: 440px;
+
+  color-scheme: light;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root { --t-fast: 0ms; --t-med: 0ms; }
+}
