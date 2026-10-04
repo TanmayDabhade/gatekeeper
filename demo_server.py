@@ -90,14 +90,39 @@ def s_pay(payee, amt, memo, known):
         return {"narration": narration, "verdict": "error", "note": str(e)}
     _speak(res.get("verdict", ""), "pay_invoice", amt, known)
     note = {"blocked": "The payee is not on the device allowlist.",
-            "approved": "Signed on the device (button hold + card tap). Money moved."
+            "approved": "Signed on the device (button hold + card tap). Money moved.",
+            "locked": "Device is LOCKED — hold RESET 3s to unlock, then retry.",
+            "denied": "Not approved on the device (no hold, no card tap, or timed out).",
             }.get(res.get("verdict"), res.get("detail", ""))
     return {"narration": narration, "verdict": res.get("verdict", "?"), "note": note}
 
 
 def s_forge():
-    narration, _ = _capture(demo_forge.run, LINK, BANK_URL)
-    return {"narration": narration or "(no output -- is bank.py running?)", "verdict": "forge",
+    if balances() is None:
+        return {"narration": "The bank is offline.\nStart it first:  NESSIE_API_KEY=… python bank.py",
+                "verdict": "error", "note": "payments + forgery checks go through the bank"}
+    good = demo_forge.device_approval(LINK, NESSIE_ACME_ACCOUNT, 75000)  # needs hold + card tap
+    if good is None:
+        return {"narration": "The device did not sign the $750.00 approval.",
+                "verdict": "error",
+                "note": "Is the device LOCKED (from an earlier step)? Hold RESET 3s, then retry. "
+                        "Approve = hold the button, then tap the card."}
+    tampered = dict(good, amt=7500000)  # the real $750 approval, edited to $75,000
+    cases = [
+        ("Legit — the approval exactly as signed", NESSIE_ACME_ACCOUNT, 75000, good),
+        ("Forged — signed with the laptop's own key", NESSIE_LOOKALIKE_ACCOUNT, 480000,
+         demo_forge.forged(NESSIE_LOOKALIKE_ACCOUNT, 480000)),
+        ("Tampered — $750 changed to $75,000", NESSIE_ACME_ACCOUNT, 7500000, tampered),
+        ("Replay — the legit approval sent again", NESSIE_ACME_ACCOUNT, 75000, good),
+    ]
+    lines = []
+    for title, payee, cents, approval in cases:
+        status, out = demo_forge.post(BANK_URL, "/pay", {"payee": payee, "amount_cents": cents,
+                                                         "memo": "INV-2293", "approval": approval})
+        ok = status == 200
+        lines.append(f"{'✅ ACCEPTED' if ok else '🚫 REJECTED'}  {title}"
+                     + ("" if ok else f"\n        {out.get('reason', '')}"))
+    return {"narration": "\n".join(lines), "verdict": "forge",
             "note": "Only the genuine device approval moved money."}
 
 
