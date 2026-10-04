@@ -87,6 +87,13 @@ def _capture(fn, *a, **k):
 _BAL = {"t": 0.0, "v": None}  # cache so frequent polls don't rate-limit the Nessie sandbox
 _PUR = {"t": 0.0, "v": None}
 
+# Clean-slate display (GATEKEEPER_DEMO_CLEAN=1): rebase balances to these round starting values
+# and show only purchases made this run, so restarting the server gives a pristine demo. Real
+# Nessie movements still happen underneath; this only rebases what the dashboard shows.
+CLEAN = bool(os.environ.get("GATEKEEPER_DEMO_CLEAN"))
+DEMO_START = {"OurCompany (payer)": 5000000, "Acme Supplies": 100000, "Acme Supp1ies (lookalike)": 0}
+_BASE = {"bal": None, "refs": None}   # snapshot captured on the first successful fetch
+
 
 def balances(force=False):
     now = time.monotonic()
@@ -94,7 +101,12 @@ def balances(force=False):
         return _BAL["v"]
     try:
         with urllib.request.urlopen(BANK_URL + "/balances", timeout=5) as r:
-            _BAL["v"] = {b["name"]: b["cents"] for b in json.load(r)["balances"]}
+            live = {b["name"]: b["cents"] for b in json.load(r)["balances"]}
+        if CLEAN:
+            if _BASE["bal"] is None:
+                _BASE["bal"] = dict(live)
+            live = {n: DEMO_START.get(n, c) + (c - _BASE["bal"].get(n, c)) for n, c in live.items()}
+        _BAL["v"] = live
     except Exception:
         _BAL["v"] = None
     _BAL["t"] = now
@@ -108,7 +120,12 @@ def purchases():
         return _PUR["v"]
     try:
         with urllib.request.urlopen(BANK_URL + "/purchases", timeout=5) as r:
-            _PUR["v"] = json.load(r)["purchases"]
+            live = json.load(r)["purchases"]
+        if CLEAN:
+            if _BASE["refs"] is None:
+                _BASE["refs"] = {p["ref"] for p in live}
+            live = [p for p in live if p["ref"] not in _BASE["refs"]]
+        _PUR["v"] = live
     except Exception:
         _PUR["v"] = None
     _PUR["t"] = now
