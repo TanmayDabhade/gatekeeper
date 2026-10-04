@@ -21,8 +21,8 @@ MFRC522 rfid(5, MFRC522::UNUSED_PIN);
 // backup. Re-enrolling in a real build would require tapping an already-enrolled card first.
 struct EnrolledCard { uint8_t uid[10]; uint8_t len; };
 const EnrolledCard ENROLLED_CARDS[] = {
-    {{0x20, 0x11, 0x1B, 0x5C}, 4},              // primary
-    {{0x04, 0x5D, 0x9A, 0x7A, 0xB7, 0x22, 0x91}, 7},  // backup
+    {{0x20, 0x11, 0x1B, 0x5C}, 4},    // primary (card)
+    {{0xF6, 0xA0, 0x25, 0xF6}, 4},    // backup (fob)
 };
 const int NUM_ENROLLED = sizeof(ENROLLED_CARDS) / sizeof(ENROLLED_CARDS[0]);
 int waitForCardTap(unsigned long timeoutMs); // defined below; used by the payment co-sign
