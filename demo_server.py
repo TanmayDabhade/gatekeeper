@@ -168,6 +168,42 @@ def s_inbox_live():
             "note": "the model didn't attempt a payment this run (it may have refused)"}
 
 
+def s_challenge(payee, amt):
+    # "Beat the Gatekeeper": a judge types any account. It goes through the SAME pay path as a
+    # real payment -- no special-casing. The device refuses because it isn't a registered payee,
+    # exactly like a bank rejecting an unverified account. Unwinnable by design, not by a trick.
+    payee = (payee or "").strip()
+    if not payee:
+        return {"narration": "Type an account to try paying.", "verdict": "error",
+                "note": "enter any account number and amount, then hit Try it"}
+    try:
+        amt = int(amt)
+    except (TypeError, ValueError):
+        amt = 75000
+    amt = amt if amt > 0 else 75000
+    try:
+        res = EX.pay_invoice(payee, amt, "CHALLENGE", "high")
+    except Exception as e:
+        return {"narration": f"Paying {payee} — {_usd(amt)}.", "verdict": "error", "note": str(e)}
+    v = res.get("verdict", "?")
+    known = payee == NESSIE_ACME_ACCOUNT
+    _speak(v, "pay_invoice", amt, known)
+    if v in ("blocked", "denied"):
+        note = (f"“{payee[:22]}” is not a registered payee — the device refused to sign. The "
+                "allowlist lives in the device firmware, where the laptop can't change it.")
+    elif v in ("approved", "hold"):
+        note = "That IS the one registered payee — and it still needs the physical button + card."
+    elif v == "locked":
+        note = "Device is LOCKED — hold RESET 3s to unlock, then try again."
+    else:
+        note = res.get("detail", "")
+    return {"narration": f"Paying {payee} — {_usd(amt)}.", "verdict": v, "note": note}
+
+
+def _usd(cents):
+    return f"${cents // 100:,}.{cents % 100:02d}"
+
+
 def s_pay(payee, amt, memo, known):
     narration = ("Paying the Acme Supplies invoice." if known
                  else "Paying the Acme Supplies invoice.")  # the laptop shows the same friendly line
@@ -287,8 +323,12 @@ class H(BaseHTTPRequestHandler):
         if self.path != "/api/run":
             return self._send(404, "{}")
         n = int(self.headers.get("Content-Length", 0))
-        sc = json.loads(self.rfile.read(n) or b"{}").get("scenario")
-        fn = SCENARIOS.get(sc)
+        body = json.loads(self.rfile.read(n) or b"{}")
+        sc = body.get("scenario")
+        if sc == "challenge":
+            fn = lambda: s_challenge(body.get("payee"), body.get("amount_cents"))
+        else:
+            fn = SCENARIOS.get(sc)
         if not fn:
             return self._send(400, json.dumps({"narration": "unknown scenario", "verdict": "error"}))
         with _lock:                       # serialize device access

@@ -31,6 +31,16 @@
       <p class="dock-label">Scenarios · press 1 to 6</p>
       <div class="dock" id="dock"></div>
     </section>
+
+    <section class="challenge" aria-label="Beat the Gatekeeper">
+      <p class="dock-label">⚔ Beat the Gatekeeper · your turn</p>
+      <p class="challenge-hint">Type <em>any</em> account and try to pay it. A legit registered payee goes through with the card — fraud never does.</p>
+      <div class="challenge-row">
+        <input id="ch-acct" class="challenge-input" type="text" placeholder="paste any account number…" autocomplete="off" spellcheck="false">
+        <input id="ch-amt" class="challenge-amt" type="number" min="1" value="750" aria-label="amount in dollars">
+        <button id="ch-go" class="challenge-go" type="button">Try it →</button>
+      </div>
+    </section>
   </main>
 
   <aside class="device" aria-label="Gatekeeper device">

@@ -228,3 +228,23 @@ body {
   .msg, .checks, .delta { animation: none; }
   .cursor, .typing-dots span { animation: none; }
 }
+
+/* ------------------------------------------------ Beat the Gatekeeper (judge challenge) */
+.challenge { margin-top: var(--s-5); }
+.challenge-hint {
+  font-size: var(--text-sm); color: var(--app-ink-muted); line-height: 1.4; margin: 0 0 var(--s-3);
+}
+.challenge-hint em { font-style: normal; color: var(--app-ink); font-weight: 600; }
+.challenge-row { display: flex; gap: var(--s-2); }
+.challenge-input, .challenge-amt {
+  font: inherit; color: var(--app-ink); background: var(--app-surface);
+  border: 1px solid var(--app-line); border-radius: var(--r-control); padding: var(--s-3);
+}
+.challenge-input { flex: 1; font-family: var(--font-mono); font-size: var(--text-sm); }
+.challenge-amt { width: 90px; }
+.challenge-input:focus, .challenge-amt:focus { outline: none; border-color: var(--app-brand); box-shadow: 0 0 0 3px var(--app-brand-soft); }
+.challenge-go {
+  font: inherit; font-weight: 700; cursor: pointer; color: #fff;
+  background: var(--stop-ink); border: 0; border-radius: var(--r-control); padding: 0 var(--s-4);
+}
+.challenge-go:hover { filter: brightness(1.08); }

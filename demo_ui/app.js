@@ -232,11 +232,23 @@
   }
 
   function run(s) {
+    runRequest(s.id, s.ask, { scenario: s.id });
+  }
+
+  function runChallenge() {
+    var acct = $("ch-acct").value.trim();
+    if (!acct) { $("ch-acct").focus(); return; }
+    var dollars = parseFloat($("ch-amt").value) || 750;
+    runRequest("challenge", "Pay " + acct + " $" + dollars + ".",
+               { scenario: "challenge", payee: acct, amount_cents: Math.round(dollars * 100) });
+  }
+
+  function runRequest(activeId, ask, body) {
     if (busy) return;
     busy = true;
-    lockDock(s.id);
+    lockDock(activeId);
     clearThread();
-    message("user", "You", s.ask);
+    message("user", "You", ask);
     var dots = typing();
     setOled("CHECKING", "approve on the device if asked", "hold", true);
     setLeds("hold");
@@ -245,7 +257,7 @@
     fetch("/api/run", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ scenario: s.id })
+      body: JSON.stringify(body)
     }).then(function (r) { return r.json(); }).then(function (r) {
       dots.remove();
       renderNarration(r);
@@ -266,6 +278,8 @@
   }
 
   buildDock();
+  $("ch-go").addEventListener("click", runChallenge);
+  $("ch-acct").addEventListener("keydown", function (e) { if (e.key === "Enter") runChallenge(); });
   tick();
   setInterval(tick, 15000);
   refresh();
