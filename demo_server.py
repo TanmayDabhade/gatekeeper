@@ -85,6 +85,7 @@ def _capture(fn, *a, **k):
 
 
 _BAL = {"t": 0.0, "v": None}  # cache so frequent polls don't rate-limit the Nessie sandbox
+_PUR = {"t": 0.0, "v": None}
 
 
 def balances(force=False):
@@ -98,6 +99,20 @@ def balances(force=False):
         _BAL["v"] = None
     _BAL["t"] = now
     return _BAL["v"]
+
+
+def purchases():
+    """Vendor-payment audit trail from the bank (cached). [] if the bank is offline."""
+    now = time.monotonic()
+    if _PUR["v"] is not None and now - _PUR["t"] < 8:
+        return _PUR["v"]
+    try:
+        with urllib.request.urlopen(BANK_URL + "/purchases", timeout=5) as r:
+            _PUR["v"] = json.load(r)["purchases"]
+    except Exception:
+        _PUR["v"] = None
+    _PUR["t"] = now
+    return _PUR["v"]
 
 
 def _bg(fn, *a):
@@ -336,7 +351,8 @@ class H(BaseHTTPRequestHandler):
         if self.path == "/api/state":
             bals = balances()
             return self._send(200, json.dumps({
-                "balances": bals, "device": EX is not None, "bank": bals is not None,
+                "balances": bals, "purchases": purchases(), "device": EX is not None,
+                "bank": bals is not None,
                 "voice": bool(voice_host and os.environ.get("GATEKEEPER_VOICE"))}))
         found = ui_file(self.path.split("?", 1)[0])
         if found:
@@ -364,7 +380,7 @@ class H(BaseHTTPRequestHandler):
                     out = fn()
                 except Exception as e:
                     out = {"narration": f"error: {e}", "verdict": "error", "note": ""}
-        _BAL["t"] = 0                      # force fresh balances after an action
+        _BAL["t"] = _PUR["t"] = 0          # force fresh balances + purchases after an action
         return self._send(200, json.dumps(out))
 
 

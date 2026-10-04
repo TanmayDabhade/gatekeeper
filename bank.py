@@ -36,10 +36,11 @@ def say(*lines):
 class Bank:
     """Verify, then pay. `transfer(payee, cents, memo, ref)` moves the money (Nessie)."""
 
-    def __init__(self, verify, transfer, balances=lambda: []):
+    def __init__(self, verify, transfer, balances=lambda: [], purchases=lambda: []):
         self.verifier = verify
         self.transfer = transfer
         self.balances = balances
+        self.purchases = purchases
 
     def pay(self, body):
         """Return (http status, reply dict) for one POST /pay body."""
@@ -87,13 +88,19 @@ def handler_for(bank):
             self._reply(*bank.pay(body))
 
         def do_GET(self):
-            if self.path != "/balances":
-                return self._reply(404, {"ok": False, "reason": "unknown endpoint"})
-            try:
-                rows = [{"name": n, "account": a, "cents": c} for n, a, c in bank.balances()]
-            except nessie.NessieError as e:
-                return self._reply(502, {"ok": False, "reason": str(e)})
-            self._reply(200, {"ok": True, "balances": rows})
+            if self.path == "/balances":
+                try:
+                    rows = [{"name": n, "account": a, "cents": c} for n, a, c in bank.balances()]
+                except nessie.NessieError as e:
+                    return self._reply(502, {"ok": False, "reason": str(e)})
+                return self._reply(200, {"ok": True, "balances": rows})
+            if self.path == "/purchases":
+                try:
+                    rows = [{"ref": r, "cents": c, "memo": m} for r, c, m in bank.purchases()]
+                except nessie.NessieError as e:
+                    return self._reply(502, {"ok": False, "reason": str(e)})
+                return self._reply(200, {"ok": True, "purchases": rows})
+            return self._reply(404, {"ok": False, "reason": "unknown endpoint"})
 
         def log_message(self, *args):      # the [bank] lines are the log
             pass
@@ -125,7 +132,8 @@ def main():
         return ids
 
     bank = Bank(verifier.Verifier(vk, nonce_path=BANK_NONCES), transfer,
-                lambda: nessie.balances(client))
+                lambda: nessie.balances(client),
+                lambda: client.purchases(NESSIE_COMPANY_ACCOUNT))
     server = serve(bank, port=args.port)
     say("=" * 52,
         " GATEKEEPER BANK (payment verifier)",

@@ -199,6 +199,18 @@
     lastBalances = balances;
   }
 
+  function renderPurchases(rows) {
+    var box = $("purchases");
+    if (!rows || !rows.length) return;   // keep the "blocked fraud never appears here" hint
+    box.textContent = "";
+    rows.slice().reverse().forEach(function (p) {
+      var row = el("div", "row");
+      row.appendChild(el("span", "row-name", "Acme Supplies · " + p.ref));
+      row.appendChild(el("span", "row-amt", money(p.cents)));
+      box.appendChild(row);
+    });
+  }
+
   function setPill(id, up) {
     var p = $(id);
     p.classList.toggle("up", up === true);
@@ -208,6 +220,7 @@
   function refresh() {
     return fetch("/api/state").then(function (r) { return r.json(); }).then(function (s) {
       renderLedger(s.balances);
+      renderPurchases(s.purchases);
       setPill("h-device", !!s.device);
       setPill("h-bank", !!s.bank);
       setPill("h-voice", s.voice ? true : null);   // voice is optional: off is grey, not red
