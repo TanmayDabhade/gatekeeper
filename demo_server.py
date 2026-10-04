@@ -41,11 +41,37 @@ ANSI = re.compile(r"\x1b\[[0-9;]*m")
 PORT = 8800
 _lock = threading.Lock()        # one device action at a time (shared link)
 
-print(f"opening device at {DEVICE_PORT} ...")
-LINK = executor.DeviceLink(DEVICE_PORT, timeout=60)
-VK = executor.load_or_pin(LINK, PUBKEY_PATH)
-EX = executor.Executor(LINK, VK)
-print("device pinned, link open.")
+LINK = VK = EX = None
+
+
+def ensure_device(force=False):
+    """Open the shared link lazily and self-heal. If the board was reset/re-enumerated the old
+    handle is dead, so ping it and reopen when needed. Returns True if the device is ready."""
+    global LINK, VK, EX
+    if EX is not None and not force:
+        try:
+            if LINK.call({"t": "ping"}).get("t") == "pong":
+                return True
+        except Exception:
+            pass  # handle is dead -> reopen below
+    try:
+        if LINK is not None:
+            try:
+                LINK.close()
+            except Exception:
+                pass
+        LINK = executor.DeviceLink(DEVICE_PORT, timeout=60)
+        VK = executor.load_or_pin(LINK, PUBKEY_PATH)
+        EX = executor.Executor(LINK, VK)
+        print(f"device connected at {DEVICE_PORT}")
+        return True
+    except Exception as e:
+        LINK = VK = EX = None
+        print(f"device not ready ({DEVICE_PORT}): {e}")
+        return False
+
+
+ensure_device()  # best-effort now; it reconnects on first use if the board isn't ready yet
 
 
 def _capture(fn, *a, **k):
@@ -284,7 +310,7 @@ class H(BaseHTTPRequestHandler):
         if self.path == "/api/state":
             bals = balances()
             return self._send(200, json.dumps({
-                "balances": bals, "device": True, "bank": bals is not None,
+                "balances": bals, "device": EX is not None, "bank": bals is not None,
                 "voice": bool(voice_host and os.environ.get("GATEKEEPER_VOICE"))}))
         return self._send(404, "{}")
 
@@ -297,10 +323,14 @@ class H(BaseHTTPRequestHandler):
         if not fn:
             return self._send(400, json.dumps({"narration": "unknown scenario", "verdict": "error"}))
         with _lock:                       # serialize device access
-            try:
-                out = fn()
-            except Exception as e:
-                out = {"narration": f"error: {e}", "verdict": "error", "note": ""}
+            if not ensure_device():       # self-heal if the board was reset/unplugged
+                out = {"narration": f"Device offline at {DEVICE_PORT} — plug in the board.",
+                       "verdict": "error", "note": "it reconnects automatically once it's back"}
+            else:
+                try:
+                    out = fn()
+                except Exception as e:
+                    out = {"narration": f"error: {e}", "verdict": "error", "note": ""}
         _BAL["t"] = 0                      # force fresh balances after an action
         return self._send(200, json.dumps(out))
 
