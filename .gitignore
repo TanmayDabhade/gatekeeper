@@ -16,3 +16,4 @@ bench_results/
 include/secrets.h
 .bank_nonces
 data/inbox_live.json
+.demo.env
