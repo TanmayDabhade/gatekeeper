@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gatekeeper</title>
+<style>
+  :root{
+    --bg:#0b0f17; --panel:#111726; --line:#1e2941;
+    --ink:#eef2f8; --muted:#8793a8; --accent:#ff4d4f; --good:#2fd27a; --brand:#4e9bff;
+    --mono:"SF Mono",ui-monospace,Menlo,Consolas,monospace;
+    --ui:-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{background:var(--bg);color:var(--ink);font-family:var(--ui);overflow:hidden}
+  .deck{height:100vh;width:100vw;position:relative}
+  .slide{position:absolute;inset:0;display:none;flex-direction:column;justify-content:center;
+    padding:8vh 9vw;opacity:0;transition:opacity .35s ease}
+  .slide.on{display:flex;opacity:1}
+  .kicker{font-family:var(--mono);font-size:1.1vw;letter-spacing:.35em;text-transform:uppercase;
+    color:var(--muted);margin-bottom:3vh}
+  h1{font-size:8vw;font-weight:800;line-height:.98;letter-spacing:-.02em}
+  h2{font-size:4vw;font-weight:800;line-height:1.08;letter-spacing:-.01em;max-width:72%}
+  .tag{color:var(--accent)}
+  .sub{font-size:1.9vw;color:var(--muted);margin-top:3vh;font-weight:500}
+  ul{list-style:none;margin-top:5vh;display:flex;flex-direction:column;gap:2.4vh}
+  li{font-size:2.1vw;line-height:1.3;padding-left:2.4vw;position:relative;color:#d7deea}
+  li::before{content:"";position:absolute;left:0;top:.75em;width:1.1vw;height:1.1vw;
+    background:var(--accent);border-radius:2px}
+  li b{color:var(--ink)}
+  .flow{display:flex;align-items:center;gap:1.4vw;margin-top:6vh;flex-wrap:wrap}
+  .node{font-family:var(--mono);font-size:1.5vw;padding:2.2vh 1.8vw;border:1px solid var(--line);
+    border-radius:10px;background:var(--panel);text-align:center;line-height:1.3}
+  .node small{display:block;color:var(--muted);font-size:1vw;margin-top:.6vh}
+  .node.dev{border-color:var(--accent);box-shadow:0 0 0 3px rgba(255,77,79,.15)}
+  .arrow{color:var(--muted);font-size:2.4vw}
+  .stats{display:flex;gap:5vw;margin-top:4vh;flex-wrap:wrap}
+  .stat .n{font-size:7vw;font-weight:800;line-height:1;color:var(--good)}
+  .stat .n.red{color:var(--accent)}
+  .stat .l{font-size:1.4vw;color:var(--muted);margin-top:1.5vh;max-width:16vw}
+  table{margin-top:5vh;border-collapse:collapse;font-size:1.6vw}
+  td,th{text-align:left;padding:1.4vh 2.2vw;border-bottom:1px solid var(--line)}
+  th{color:var(--muted);font-weight:600;font-size:1.1vw;text-transform:uppercase;letter-spacing:.1em}
+  .fell{color:var(--accent);font-weight:700}
+  .held{color:var(--good);font-weight:700}
+  .note{margin-top:5vh;font-size:1.5vw;color:var(--muted);font-style:italic;max-width:68%;line-height:1.4}
+  .close{font-size:2.6vw;font-weight:700;line-height:1.3;max-width:80%}
+  .bar{position:fixed;bottom:0;left:0;height:4px;background:var(--accent);transition:width .35s}
+  .count{position:fixed;bottom:2.4vh;right:3vw;font-family:var(--mono);font-size:1.1vw;color:var(--muted)}
+  .hint{position:fixed;bottom:2.4vh;left:3vw;font-family:var(--mono);font-size:1vw;color:#3a465c}
+</style>
+</head>
+<body>
+<div class="deck" id="deck">
+
+  <section class="slide">
+    <div class="kicker">Hardware approval for AI agents</div>
+    <h1>GATEKEEPER</h1>
+    <div class="sub">The one screen your AI <span class="tag">can't lie to.</span></div>
+  </section>
+
+  <section class="slide">
+    <div class="kicker">The problem</div>
+    <h2>AI agents can be hijacked &mdash; and you'd approve it without knowing.</h2>
+    <ul>
+      <li>Agents now send email, delete files, and <b>move money</b>.</li>
+      <li>They read untrusted content &mdash; emails, invoices &mdash; that can carry hidden instructions.</li>
+      <li>The confirmation lives on <b>the same screen the attacker controls</b>, so a dangerous action looks harmless.</li>
+    </ul>
+  </section>
+
+  <section class="slide">
+    <div class="kicker">The solution</div>
+    <h2>Put the real action on a screen the software <span class="tag">can't touch.</span></h2>
+    <ul>
+      <li>The agent can only <b>ask</b>. Nothing happens until a separate device shows the true recipient, file, or amount.</li>
+      <li>A human approves physically: a button hold, plus an <b>RFID card tap</b> for payments over $500.</li>
+      <li>The device signs the verdict with an <b>Ed25519 key that never leaves the hardware</b>.</li>
+    </ul>
+  </section>
+
+  <section class="slide">
+    <div class="kicker">How it works</div>
+    <h2>The host can lie. It can't <span class="tag">forge a signature.</span></h2>
+    <div class="flow">
+      <div class="node">AI agent<small>untrusted</small></div>
+      <div class="arrow">&rarr;</div>
+      <div class="node">Host<small>holds no keys</small></div>
+      <div class="arrow">&rarr;</div>
+      <div class="node dev">Gatekeeper<small>shows truth, signs</small></div>
+      <div class="arrow">&rarr;</div>
+      <div class="node">Bank<small>verifies, then pays</small></div>
+    </div>
+    <div class="note">Even a fully compromised laptop cannot move money to an account the human didn't physically approve. A forged, tampered, or replayed approval is rejected by the bank &mdash; not the software.</div>
+  </section>
+
+  <section class="slide">
+    <div class="kicker">Live demo</div>
+    <h2>See it on <span class="tag">real hardware.</span></h2>
+    <ul>
+      <li><b>Invoice fraud</b> &mdash; pay a lookalike vendor &rarr; blocked, ledger doesn't move.</li>
+      <li><b>Legit payment</b> &mdash; real vendor paid, only with a button hold + card tap.</li>
+      <li><b>Live model</b> &mdash; DeepSeek reads the fraud invoice, falls for it &rarr; device blocks it.</li>
+      <li><b>Forged approval</b> &mdash; forged, tampered, replayed &rarr; all rejected by the bank.</li>
+      <li><b>Beat the Gatekeeper</b> &mdash; type any account; the device refuses every unregistered payee.</li>
+    </ul>
+  </section>
+
+  <section class="slide">
+    <div class="kicker">Results &middot; measured on the real ESP32</div>
+    <h2>Every attack caught. Nothing got through.</h2>
+    <div class="stats">
+      <div class="stat"><div class="n">24/24</div><div class="l">attacks caught</div></div>
+      <div class="stat"><div class="n red">0</div><div class="l">executed &middot; 0 false positives</div></div>
+      <div class="stat"><div class="n" style="color:var(--brand)">42ms</div><div class="l">device decision latency</div></div>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="kicker">The real threat</div>
+    <h2>The models teams actually ship <span class="tag">still fall for it.</span></h2>
+    <table>
+      <tr><th>Model</th><th>Tried to pay the fraudster?</th><th>Device</th></tr>
+      <tr><td>Grok 4 (frontier)</td><td class="held">Resisted</td><td>&mdash;</td></tr>
+      <tr><td>DeepSeek-V3</td><td class="fell">Fell for it</td><td class="held">BLOCKED</td></tr>
+      <tr><td>Llama 3.3 70B</td><td class="fell">Fell for it</td><td class="held">BLOCKED</td></tr>
+      <tr><td>Ministral-8B</td><td class="fell">Fell for it</td><td class="held">BLOCKED</td></tr>
+    </table>
+    <div class="note">Detection is probabilistic. Enforcement is not. The device is the backstop for when the model fails.</div>
+  </section>
+
+  <section class="slide">
+    <div class="kicker">Why it wins</div>
+    <h2>A moat a <span class="tag">"better model"</span> can't close.</h2>
+    <ul>
+      <li>A tamper-isolated display, a key the host can't extract, and an independent verifier that rejects forgeries.</li>
+      <li><b>Action-agnostic</b> &mdash; the same device gates payments, email, file deletion, and code execution.</li>
+      <li>Built with ESP32, Ed25519, Capital One Nessie, and ElevenLabs.</li>
+    </ul>
+    <div class="close" style="margin-top:6vh">A lying agent, a fraudulent payee, a tampered approval &mdash; all stopped, with real money on the line. <span class="tag">That's what thirty dollars of hardware buys.</span></div>
+  </section>
+
+</div>
+
+<div class="bar" id="bar"></div>
+<div class="count" id="count"></div>
+<div class="hint">&larr; &rarr; or space to navigate &middot; F for full screen</div>
+
+<script>
+  var slides=[].slice.call(document.querySelectorAll('.slide')),i=0;
+  function show(n){
+    i=Math.max(0,Math.min(slides.length-1,n));
+    slides.forEach(function(s,k){s.classList.toggle('on',k===i)});
+    document.getElementById('bar').style.width=((i+1)/slides.length*100)+'%';
+    document.getElementById('count').textContent=(i+1)+' / '+slides.length;
+  }
+  document.addEventListener('keydown',function(e){
+    if(e.key==='ArrowRight'||e.key===' '||e.key==='PageDown'){show(i+1);e.preventDefault();}
+    else if(e.key==='ArrowLeft'||e.key==='PageUp'){show(i-1);}
+    else if(e.key==='Home'){show(0);}else if(e.key==='End'){show(slides.length-1);}
+    else if(e.key==='f'||e.key==='F'){
+      if(!document.fullscreenElement)document.documentElement.requestFullscreen();
+      else document.exitFullscreen();
+    }
+  });
+  document.getElementById('deck').addEventListener('click',function(){show(i+1);});
+  show(0);
+</script>
+</body>
+</html>
