@@ -77,6 +77,14 @@ def _speak(verdict, act="", amt=0, known=True):
             pass
 
 
+def _say(text):
+    if voice_host and os.environ.get("GATEKEEPER_VOICE"):
+        try:
+            voice_host.say(text)
+        except Exception:
+            pass
+
+
 # ---- scenarios (each returns narration, verdict, note) ----
 
 def s_inbox():
@@ -131,6 +139,8 @@ def s_forge():
         ok = status == 200
         lines.append(f"{'✅ ACCEPTED' if ok else '🚫 REJECTED'}  {title}"
                      + ("" if ok else f"\n        {out.get('reason', '')}"))
+    _say("Only the genuine device approval was accepted. The forged, tampered, and replayed "
+         "approvals were all rejected by the bank.")
     return {"narration": "\n".join(lines), "verdict": "forge",
             "note": "Only the genuine device approval moved money."}
 
