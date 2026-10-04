@@ -15,6 +15,7 @@ import json
 import os
 import re
 import threading
+import time
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -51,12 +52,20 @@ def _capture(fn, *a, **k):
     return ANSI.sub("", buf.getvalue()).strip(), out
 
 
-def balances():
+_BAL = {"t": 0.0, "v": None}  # cache so frequent polls don't rate-limit the Nessie sandbox
+
+
+def balances(force=False):
+    now = time.monotonic()
+    if not force and _BAL["v"] is not None and now - _BAL["t"] < 8:
+        return _BAL["v"]
     try:
         with urllib.request.urlopen(BANK_URL + "/balances", timeout=5) as r:
-            return {b["name"]: b["cents"] for b in json.load(r)["balances"]}
+            _BAL["v"] = {b["name"]: b["cents"] for b in json.load(r)["balances"]}
     except Exception:
-        return None
+        _BAL["v"] = None
+    _BAL["t"] = now
+    return _BAL["v"]
 
 
 def _speak(verdict, act="", amt=0, known=True):
@@ -242,6 +251,7 @@ class H(BaseHTTPRequestHandler):
                 out = fn()
             except Exception as e:
                 out = {"narration": f"error: {e}", "verdict": "error", "note": ""}
+        _BAL["t"] = 0                      # force fresh balances after an action
         return self._send(200, json.dumps(out))
 
 
