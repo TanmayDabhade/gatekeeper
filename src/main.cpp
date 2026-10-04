@@ -17,8 +17,14 @@ String lineBuf;
 // ---------- RFID co-sign (F4) ----------
 // RC522 clone: SS=5, RST tied to 3.3V (soft reset), SPI 18/19/23. VersionReg reads 0x18.
 MFRC522 rfid(5, MFRC522::UNUSED_PIN);
-const uint8_t ENROLLED_UID[] = {0x20, 0x11, 0x1B, 0x5C}; // the card that co-signs large payments
-const uint8_t ENROLLED_UID_LEN = sizeof(ENROLLED_UID);
+// Enrolled co-sign cards (any one signs). Multiple so a lost card isn't a lockout -- keep a
+// backup. Re-enrolling in a real build would require tapping an already-enrolled card first.
+struct EnrolledCard { uint8_t uid[10]; uint8_t len; };
+const EnrolledCard ENROLLED_CARDS[] = {
+    {{0x20, 0x11, 0x1B, 0x5C}, 4},              // primary
+    {{0x04, 0x5D, 0x9A, 0x7A, 0xB7, 0x22, 0x91}, 7},  // backup
+};
+const int NUM_ENROLLED = sizeof(ENROLLED_CARDS) / sizeof(ENROLLED_CARDS[0]);
 int waitForCardTap(unsigned long timeoutMs); // defined below; used by the payment co-sign
 
 // ---------- pins ----------
@@ -715,10 +721,16 @@ int waitForCardTap(unsigned long timeoutMs)
   {
     if (rfid.PICC_IsNewCardPresent() && rfid.PICC_ReadCardSerial())
     {
-      bool match = (rfid.uid.size == ENROLLED_UID_LEN);
-      for (byte i = 0; match && i < rfid.uid.size; i++)
-        if (rfid.uid.uidByte[i] != ENROLLED_UID[i])
-          match = false;
+      bool match = false;
+      for (int c = 0; c < NUM_ENROLLED && !match; c++)
+      {
+        if (rfid.uid.size != ENROLLED_CARDS[c].len)
+          continue;
+        match = true;
+        for (byte i = 0; i < rfid.uid.size; i++)
+          if (rfid.uid.uidByte[i] != ENROLLED_CARDS[c].uid[i])
+            match = false;
+      }
       rfid.PICC_HaltA();
       return match ? 1 : -1;
     }
